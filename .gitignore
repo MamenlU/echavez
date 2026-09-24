@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+uploads/receipts/
+
+.vercel/
+.bolt/
+_backup_continue_payment_20260915-215345/
+.env.*
+!.env.example
+backend/uploads/receipts/

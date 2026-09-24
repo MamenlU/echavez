@@ -1,0 +1,13 @@
+{
+  "name": "echavez-web-root",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "project",
+    "backend"
+  ],
+  "scripts": {
+    "build": "cd project && npm run build"
+  }
+}

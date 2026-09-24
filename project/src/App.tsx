@@ -1,0 +1,186 @@
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from 'react-router-dom';
+
+import { Navbar } from './components/Navbar';
+import { Footer } from './components/Footer';
+import { Home } from './pages/Home';
+import { ProjectOverview } from './pages/ProjectOverview';
+import { CustomerRegister } from './pages/CustomerRegister';
+import { Login } from './pages/Login';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
+import { CustomerDashboard } from './pages/CustomerDashboard';
+import { AdminDashboard } from './pages/AdminDashboard';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { PaymentReturn } from './pages/PaymentReturn';
+import { ScrollManager } from './components/ScrollManager';
+
+import {
+  getDashboardPath,
+  getStoredSession,
+} from './utils/authSession';
+
+function ConditionalFooter() {
+  const { pathname } = useLocation();
+
+  // Admin and Customer dashboards use their own page layout.
+  if (pathname.includes('/dashboard')) {
+    return null;
+  }
+
+  return <Footer />;
+}
+
+function RootRoute() {
+  const session = getStoredSession();
+
+  if (session) {
+    return (
+      <Navigate
+        to={getDashboardPath(session.user.role)}
+        replace
+      />
+    );
+  }
+
+  return <Home />;
+}
+
+function LoginRoute() {
+  const session = getStoredSession();
+
+  if (session) {
+    return (
+      <Navigate
+        to={getDashboardPath(session.user.role)}
+        replace
+      />
+    );
+  }
+
+  return <Login />;
+}
+
+function CustomerRegisterRoute() {
+  const session = getStoredSession();
+
+  if (session) {
+    return (
+      <Navigate
+        to={getDashboardPath(session.user.role)}
+        replace
+      />
+    );
+  }
+
+  return <CustomerRegister />;
+}
+
+function ForgotPasswordRoute() {
+  const session = getStoredSession();
+
+  if (session) {
+    return (
+      <Navigate
+        to={getDashboardPath(session.user.role)}
+        replace
+      />
+    );
+  }
+
+  return <ForgotPassword />;
+}
+
+function App() {
+  return (
+    <Router>
+      <ScrollManager />
+      <Routes>
+        {/* Standalone pages */}
+        <Route path="/payment/success" element={<PaymentReturn />} />
+        <Route path="/payment/failed" element={<PaymentReturn />} />
+        <Route path="/project" element={<ProjectOverview />} />
+
+        {/* Main storefront / customer / admin layout */}
+        <Route
+          path="/*"
+          element={
+            <div id="top" className="min-h-screen bg-steel-50 flex flex-col">
+              <Navbar />
+
+              <div className="flex-grow">
+                <Routes>
+                  {/* Role-aware main URL */}
+                  <Route path="/" element={<RootRoute />} />
+
+                  {/* Public Customer registration only */}
+                  <Route
+                    path="/register/customer"
+                    element={<CustomerRegisterRoute />}
+                  />
+
+                  {/* No public Admin registration */}
+                  <Route
+                    path="/register/admin"
+                    element={<Navigate to="/login" replace />}
+                  />
+
+                  {/* Logged-in users should not see Login again */}
+                  <Route
+                    path="/login"
+                    element={<LoginRoute />}
+                  />
+
+                  <Route
+                  path="/forgot-password"
+                  element={<ForgotPasswordRoute />}
+                  />
+
+                  <Route
+                    path="/reset-password"
+                    element={<ResetPassword />}
+                  />
+
+                  {/* Customer */}
+                  <Route
+                    path="/customer/dashboard"
+                    element={
+                      <ProtectedRoute allowedRole="customer">
+                        <CustomerDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Admin */}
+                  <Route
+                    path="/admin/dashboard"
+                    element={
+                      <ProtectedRoute allowedRole="admin">
+                        <AdminDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Unknown URLs return to the correct entry point */}
+                  <Route
+                    path="*"
+                    element={<Navigate to="/" replace />}
+                  />
+                </Routes>
+              </div>
+
+              <ConditionalFooter />
+            </div>
+          }
+        />
+      </Routes>
+    </Router>
+  );
+}
+
+export default App;
