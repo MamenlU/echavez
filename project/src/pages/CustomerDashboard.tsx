@@ -1152,6 +1152,7 @@ const getFeaturedCategoryImage = (
   };
 
   return (
+  <div className="min-h-screen w-full overflow-x-clip">
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-4 pb-16 pt-24 sm:px-6 lg:px-8">
       
       {/* ========================================================
@@ -1259,6 +1260,7 @@ const getFeaturedCategoryImage = (
 
       </div>
     </div>
+    
 
     {/* Customer reassurance callout */}
     <div className="pointer-events-none absolute bottom-6 right-4 hidden max-w-[250px] rounded-2xl border border-white/80 bg-white/90 p-4 shadow-xl shadow-emerald-950/10 backdrop-blur-md sm:right-6 lg:right-8 lg:block">
@@ -2781,6 +2783,7 @@ const getFeaturedCategoryImage = (
         </div>
       )}
 
+    </div>
     </div>
   );
 }
