@@ -16,9 +16,6 @@ if (process.env.DATABASE_URL) {
         waitForConnections: true,
         connectionLimit: 5,
         queueLimit: 0,
-        ssl: process.env.DB_SSL_CA
-    ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n'), rejectUnauthorized: true }
-    : undefined,
         enableKeepAlive: true,
         keepAliveInitialDelay: 0,
         ssl: { rejectUnauthorized: false },
@@ -33,6 +30,9 @@ if (process.env.DATABASE_URL) {
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,
+        ssl: process.env.DB_SSL_CA
+    ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n'), rejectUnauthorized: true }
+    : undefined,
     });
 }
 
