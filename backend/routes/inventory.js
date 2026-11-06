@@ -1,39 +1,18 @@
 import express from 'express';
-import { randomInt } from 'node:crypto';
-import fs from 'fs';
-import path from 'path';
 import pool from '../db.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { normalizeSupplierReference } from '../lib/stockAudit.js';
 import { recordAuditLog } from '../lib/auditService.js';
 import { syncPurchaseOrderStatus } from '../lib/purchaseOrderService.js';
+import {
+  createSignedImageUrl,
+  safelyDeleteStoredImage,
+  storeReceiptImage,
+} from '../lib/imageStorage.js';
 
 const router = express.Router();
-const RECEIPTS_DIR = path.join(process.cwd(), 'uploads', 'receipts');
 
 router.use(authenticateToken, requireAdmin);
-
-function processReceipt(receiptImage) {
-  if (!receiptImage) return null;
-  const value = String(receiptImage);
-  const match = value.match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
-  if (!match) {
-    throw Object.assign(new Error('Receipt must be a JPG, PNG, or WEBP image.'), { statusCode: 400 });
-  }
-
-  const buffer = Buffer.from(match[2], 'base64');
-  if (buffer.length > 5 * 1024 * 1024) {
-    throw Object.assign(new Error('Receipt image must not exceed 5 MB.'), { statusCode: 400 });
-  }
-
-  if (process.env.NODE_ENV === 'production') return value;
-  if (!fs.existsSync(RECEIPTS_DIR)) fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
-
-  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
-  const fileName = `receipt_${Date.now()}_${randomInt(1000, 10000)}.${extension}`;
-  fs.writeFileSync(path.join(RECEIPTS_DIR, fileName), buffer);
-  return `/api/uploads/receipts/${fileName}`;
-}
 
 router.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Inventory module is ready.', admin_id: req.user.id });
@@ -106,7 +85,11 @@ router.get('/movements', async (_req, res) => {
       ORDER BY im.movement_date DESC, im.movement_id DESC`
     );
 
-    res.json(rows);
+    const rowsWithSignedReceipts = await Promise.all(rows.map(async (row) => ({
+      ...row,
+      receipt_path: await createSignedImageUrl(row.receipt_path),
+    })));
+    res.json(rowsWithSignedReceipts);
   } catch (error) {
     console.error('Inventory movement history error:', error);
     res.status(500).json({ error: 'Unable to load inventory movement history.' });
@@ -212,8 +195,9 @@ router.post('/receive', async (req, res) => {
   }
 
   const connection = await pool.getConnection();
+  let receiptPath = null;
   try {
-    const receiptPath = processReceipt(receipt_image);
+    receiptPath = await storeReceiptImage(receipt_image);
     await connection.beginTransaction();
 
     const [productRows] = await connection.query(
@@ -407,6 +391,7 @@ router.post('/receive', async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    await safelyDeleteStoredImage(receiptPath);
     if (error.code === 'ER_DUP_ENTRY') {
       const [existing] = await pool.query(
         'SELECT movement_id FROM inventory_movements WHERE receiving_request_id = ? LIMIT 1',
