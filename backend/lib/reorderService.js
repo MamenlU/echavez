@@ -143,7 +143,7 @@ export async function getReorderSuggestions(db) {
        INNER JOIN sales sale
          ON sale.sale_id = si.sale_id
         AND sale.payment_status = 'Paid'
-        AND sale.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND sale.sale_date >= NOW() - INTERVAL '30 days'
        LEFT JOIN (
          SELECT
            sai.sale_item_id,

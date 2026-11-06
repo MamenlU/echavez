@@ -92,7 +92,7 @@ async function ensureOrderConversation(executor, { orderId, customerId, createdA
         `INSERT INTO conversations
             (customer_id, conversation_type, order_id, subject, created_at, updated_at)
          VALUES (?, 'order', ?, NULL, ?, ?)
-         ON DUPLICATE KEY UPDATE customer_id = VALUES(customer_id)`,
+         ON CONFLICT (order_id) DO UPDATE SET customer_id = EXCLUDED.customer_id`,
         [customerId, orderId, timestamp, timestamp]
     );
 
@@ -130,9 +130,10 @@ async function insertMessage(
 
     if (eventKey) {
         [result] = await executor.query(
-            `INSERT IGNORE INTO conversation_messages
+            `INSERT INTO conversation_messages
                 (conversation_id, sender_id, sender_type, message, read_at, event_key, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (event_key) DO NOTHING`,
             [
                 conversationId,
                 senderId ?? null,

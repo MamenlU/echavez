@@ -59,7 +59,7 @@ router.get('/', async (req, res) => {
     }
 
     if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-      conditions.push('al.created_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      conditions.push("al.created_at < (?::timestamp + INTERVAL '1 day')");
       params.push(`${to} 00:00:00`);
     }
 

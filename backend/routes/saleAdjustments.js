@@ -133,8 +133,8 @@ router.get('/', async (req, res) => {
     }
     if (search) {
       conditions.push(`(
-        CAST(sa.adjustment_id AS CHAR) LIKE ? OR
-        CAST(sa.sale_id AS CHAR) LIKE ? OR
+        CAST(sa.adjustment_id AS TEXT) LIKE ? OR
+        CAST(sa.sale_id AS TEXT) LIKE ? OR
         COALESCE(s.order_id, '') LIKE ? OR
         sa.reason LIKE ? OR
         COALESCE(sa.refund_reference, '') LIKE ? OR
@@ -182,7 +182,7 @@ router.get('/', async (req, res) => {
            SUM(sai.quantity) AS total_quantity,
            SUM(CASE WHEN sai.restockable = 1 THEN sai.quantity ELSE 0 END) AS restocked_quantity,
            SUM(CASE WHEN sai.restockable = 0 THEN sai.quantity ELSE 0 END) AS non_restocked_quantity,
-           GROUP_CONCAT(CONCAT(p.name, ' × ', sai.quantity) ORDER BY sai.adjustment_item_id SEPARATOR ', ') AS items_summary
+           STRING_AGG(CONCAT(p.name, ' × ', sai.quantity), ', ' ORDER BY sai.adjustment_item_id) AS items_summary
          FROM sale_adjustment_items sai
          INNER JOIN products p ON p.id = sai.product_id
          GROUP BY sai.adjustment_id

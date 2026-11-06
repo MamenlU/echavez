@@ -1004,7 +1004,7 @@ router.post('/forgot-password', async (req, res) => {
 
              (user_id, token_hash, expires_at)
 
-             VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))`,
+             VALUES (?, ?, NOW() + INTERVAL '15 minutes')`,
 
             [user.id, tokenHash]
 

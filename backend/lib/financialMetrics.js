@@ -14,13 +14,13 @@ const saleItemsAggregateSql = `
     COUNT(*) AS item_count,
     SUM(si.quantity) AS total_quantity,
     ROUND(SUM(si.subtotal), 2) AS merchandise_sales,
-    GROUP_CONCAT(
+    STRING_AGG(
       CONCAT(
         COALESCE(p.name, CONCAT('Product #', si.product_id)),
         ' × ',
         si.quantity
-      )
-      SEPARATOR ', '
+      ),
+      ', '
     ) AS items_summary
   FROM sale_items si
   LEFT JOIN products p ON p.id = si.product_id
