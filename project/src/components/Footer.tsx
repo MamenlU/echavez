@@ -7,7 +7,7 @@ import {
   Store,
   Wrench,
 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { RAYJIN_CONTACT } from '../data/contact';
 import {
@@ -22,13 +22,15 @@ interface FooterProps {
 export function Footer({ showNavigationSections = true }: FooterProps) {
   const session = getStoredSession();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const isStorefront = pathname === '/';
 
   const handleLogout = () => {
     clearStoredSession();
     localStorage.removeItem('customer_cart');
     window.dispatchEvent(new Event('storage'));
-    window.location.assign('/');
+    navigate('/', { replace: true });
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
   return (

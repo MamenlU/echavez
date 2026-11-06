@@ -1,4 +1,5 @@
 import {
+  clearStoredSession,
   getStoredSession,
   type StoredUser,
 } from '../utils/authSession';
@@ -212,11 +213,15 @@ export function Navbar() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearStoredSession();
+    localStorage.removeItem('customer_cart');
     setUser(null);
+    setCartCount(0);
+    setOpen(false);
+    setAdminMenuOpen(false);
     window.dispatchEvent(new Event('storage'));
-    window.location.href = '/';
+    navigate('/', { replace: true });
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
   const isCustomerDashboard = Boolean(isDashboard && user?.role === 'customer');
