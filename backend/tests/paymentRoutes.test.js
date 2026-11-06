@@ -157,6 +157,7 @@ test('Create ignores a forged browser amount and payment method', async t => {
     assert.equal(payload.line_items[0].amount, 25000);
     assert.deepEqual(payload.payment_method_types, ['gcash']);
     assert.equal(state.payments[0].amount, 250);
+    assert.equal(state.payments[0].livemode, 0);
     assert.equal(state.order.paymongo_link_id, 'cs_fixture');
 });
 test('Repeated Pay Online reuses the existing checkout, not a second charge attempt', async t => {

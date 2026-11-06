@@ -91,7 +91,7 @@
         sessionId,
         order.payment_method,
         amount / 100,
-        livemode,
+        livemode ? 1 : 0,
         checkoutUrl
     ]
                 );
@@ -320,7 +320,7 @@ if (proof.status === 'Paid') {
         sessionId,
         order.payment_method,
         amount / 100,
-        livemode,
+        livemode ? 1 : 0,
         checkoutUrl
     ]
                         );
