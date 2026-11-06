@@ -4,6 +4,7 @@ import React, {
   useRef
 } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { AdminMessages } from '../components/AdminMessages';
 import { AdminDashboardOverview } from '../components/AdminDashboardOverview';
 import { AdminSidebar, type AdminSidebarTab } from '../components/AdminSidebar';
@@ -558,6 +559,26 @@ const [movementTableView, setMovementTableView] = useState<'compact' | 'full'>('
 const [reportTableView, setReportTableView] = useState<'compact' | 'full'>('compact');
 const [selectedSaleHistory, setSelectedSaleHistory] = useState<SalesHistoryItem | null>(null);
 const [selectedMovementHistory, setSelectedMovementHistory] = useState<InventoryMovement | null>(null);
+
+useEffect(() => {
+  if (!selectedSaleHistory && !selectedMovementHistory) return undefined;
+
+  const previousOverflow = document.body.style.overflow;
+  const closeOnEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      setSelectedSaleHistory(null);
+      setSelectedMovementHistory(null);
+    }
+  };
+
+  document.body.style.overflow = 'hidden';
+  window.addEventListener('keydown', closeOnEscape);
+
+  return () => {
+    document.body.style.overflow = previousOverflow;
+    window.removeEventListener('keydown', closeOnEscape);
+  };
+}, [selectedSaleHistory, selectedMovementHistory]);
 
 useEffect(() => {
   localStorage.setItem('rayjin_admin_sidebar_collapsed', isSidebarCollapsed ? '1' : '0');
@@ -12840,7 +12861,7 @@ onChange={(e) =>
   )}
 </div>
 
-{selectedSaleHistory && (
+{selectedSaleHistory && createPortal(
   <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="sale-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedSaleHistory(null); }}>
     <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
       <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
@@ -12856,7 +12877,8 @@ onChange={(e) =>
         </div>
       </div>
     </div>
-  </div>
+  </div>,
+  document.body
 )}
   </div>
 )}
@@ -13069,7 +13091,7 @@ onChange={(e) =>
       )}
     </div>
 
-    {selectedMovementHistory && (
+    {selectedMovementHistory && createPortal(
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedMovementHistory(null); }}>
         <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
@@ -13086,7 +13108,8 @@ onChange={(e) =>
             {selectedMovementHistory.receipt_path && <a href={selectedMovementHistory.receipt_path} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-[#CFE0D7] bg-emerald-50 px-4 py-2.5 text-xs font-extrabold text-[#0D7740] hover:bg-emerald-100"><Eye className="h-4 w-4" />Open supporting receipt</a>}
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     )}
   </div>
 )}

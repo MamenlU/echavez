@@ -51,6 +51,9 @@ test('Inventory Movement History is the centralized full audit view', () => {
   assert.match(adminDashboard, /<th className="px-4 py-3">Receipt<\/th>/);
   assert.match(adminDashboard, /View Receipt/);
   assert.doesNotMatch(adminDashboard, />Stock-In History</);
+  assert.match(adminDashboard, /selectedMovementHistory && createPortal\(/);
+  assert.match(adminDashboard, /selectedSaleHistory && createPortal\(/);
+  assert.match(adminDashboard, /document\.body/);
 });
 
 test('Inventory movement reference labels cast numeric IDs before PostgreSQL LPAD', () => {
