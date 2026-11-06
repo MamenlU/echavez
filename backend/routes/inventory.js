@@ -63,14 +63,14 @@ router.get('/movements', async (_req, res) => {
           ELSE 'POS'
         END AS source_label,
         CASE
-          WHEN im.adjustment_request_id IS NOT NULL THEN CONCAT('ADJ-', LPAD(im.movement_id, 6, '0'))
-          WHEN im.sale_adjustment_item_id IS NOT NULL AND sa.adjustment_type = 'Void' THEN CONCAT('VOID-', LPAD(sa.adjustment_id, 6, '0'))
-          WHEN im.sale_adjustment_item_id IS NOT NULL THEN CONCAT('RET-', LPAD(sa.adjustment_id, 6, '0'))
+          WHEN im.adjustment_request_id IS NOT NULL THEN CONCAT('ADJ-', LPAD(im.movement_id::text, 6, '0'))
+          WHEN im.sale_adjustment_item_id IS NOT NULL AND sa.adjustment_type = 'Void' THEN CONCAT('VOID-', LPAD(sa.adjustment_id::text, 6, '0'))
+          WHEN im.sale_adjustment_item_id IS NOT NULL THEN CONCAT('RET-', LPAD(sa.adjustment_id::text, 6, '0'))
           WHEN im.purchase_order_item_id IS NOT NULL THEN po.po_number
           WHEN s.order_id IS NOT NULL THEN s.order_id
-          WHEN im.sale_id IS NOT NULL THEN CONCAT('POS-', LPAD(im.sale_id, 6, '0'))
-          WHEN im.remarks = 'Opening Inventory' THEN CONCAT('OPEN-', LPAD(im.movement_id, 6, '0'))
-          ELSE CONCAT('RCV-', LPAD(im.movement_id, 6, '0'))
+          WHEN im.sale_id IS NOT NULL THEN CONCAT('POS-', LPAD(im.sale_id::text, 6, '0'))
+          WHEN im.remarks = 'Opening Inventory' THEN CONCAT('OPEN-', LPAD(im.movement_id::text, 6, '0'))
+          ELSE CONCAT('RCV-', LPAD(im.movement_id::text, 6, '0'))
         END AS reference_label
       FROM inventory_movements im
       INNER JOIN products p ON p.id = im.product_id
