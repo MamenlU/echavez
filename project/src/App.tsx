@@ -10,6 +10,7 @@ import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { Home } from './pages/Home';
 import { ProjectOverview } from './pages/ProjectOverview';
+import { PromosRewards } from './pages/PromosRewards';
 import { CustomerRegister } from './pages/CustomerRegister';
 import { Login } from './pages/Login';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -33,7 +34,9 @@ function ConditionalFooter() {
     return null;
   }
 
-  return <Footer />;
+  // Adviser revision: keep the simplified footer on every public page,
+  // including Login and Customer Registration.
+  return <Footer showNavigationSections={false} />;
 }
 
 function RootRoute() {
@@ -144,6 +147,12 @@ function App() {
                   <Route
                     path="/reset-password"
                     element={<ResetPassword />}
+                  />
+
+                  {/* Capstone presentation route; uses the dedicated Rayjin project presentation shell. */}
+                  <Route
+                    path="/promos-rewards"
+                    element={<PromosRewards />}
                   />
 
                   {/* Customer */}

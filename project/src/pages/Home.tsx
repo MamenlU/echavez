@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  BadgePercent,
   CheckCircle2,
   ClipboardCheck,
   LogIn,
@@ -15,7 +16,13 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Hero } from '../components/Hero';
+import { ProductDetailsModal } from '../components/ProductDetailsModal';
+import { PopularProducts, type PopularProduct } from '../components/PopularProducts';
+import { PremiumCategoryShowcase } from '../components/PremiumCategoryShowcase';
+import { StorefrontOrderingJourney } from '../components/StorefrontOrderingJourney';
+import { StorefrontConversionHub } from '../components/StorefrontConversionHub';
 import { useReveal } from '../hooks/useReveal';
+import { rememberCustomerMessagesRedirect } from '../utils/postAuthRedirect';
 
 interface Product {
   id: number;
@@ -28,6 +35,7 @@ interface Product {
   stock: number | string;
   brand?: string | null;
   status?: 'active' | 'inactive';
+  fulfillment_rule?: 'all' | 'delivery_only';
 }
 
 interface Category {
@@ -62,11 +70,16 @@ export function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [detailsQuantity, setDetailsQuantity] = useState(1);
   const [loginPromptProduct, setLoginPromptProduct] = useState<Product | null>(null);
   const [addedMessage, setAddedMessage] = useState('');
   const [user, setUser] = useState<StoredUser | null>(null);
   const [urlSearchParams] = useSearchParams();
   const storefrontSearchParam = urlSearchParams.get('search') ?? '';
+
+  useEffect(() => {
+    setDetailsQuantity(1);
+  }, [selectedProduct?.id]);
 
   useEffect(() => {
     const userStr = localStorage.getItem('user');
@@ -165,36 +178,32 @@ export function Home() {
   const normalizeCategoryName = (value: string) =>
     value.trim().toLowerCase().replace(/&/g, 'and').replace(/\s+/g, ' ');
 
-  const featuredCategoryImages: Record<string, string> = {
-  tools: '/images/tools_category.png',
-  construction: '/images/construction_category.png',
-  electrical: '/images/electrical_category.png',
-  plumbing: '/images/plumbing_category.png',
-};
-
-  const getFeaturedCategoryImage = (category: string) => {
-    const normalizedCategory = normalizeCategoryName(category);
-    return featuredCategoryImages[normalizedCategory] || '/images/hero_hardware.png';
-  };
-
   const preferredFeaturedCategories = [
-  'Tools',
-  'Construction',
-  'Electrical',
-  'Plumbing',
-];
-  const featuredCategories = preferredFeaturedCategories
+    'Tools',
+    'Construction',
+    'Electrical',
+    'Plumbing',
+    'Lumber & Wood',
+    'Fasteners',
+  ];
+
+  const preferredCategoryMatches = preferredFeaturedCategories
     .map((preferred) =>
       categoryNames.find(
         (category) => normalizeCategoryName(category) === normalizeCategoryName(preferred)
       )
     )
     .filter((category): category is string => Boolean(category));
-  const popularProducts = availableProducts.slice(0, 8);
-  const heroProduct =
-    availableProducts.find((product) => product.name.toLowerCase().includes('roof')) ||
-    availableProducts[0];
 
+  const featuredCategories = [
+    ...preferredCategoryMatches,
+    ...categoryNames.filter(
+      (category) => !preferredCategoryMatches.some(
+        (featured) => normalizeCategoryName(featured) === normalizeCategoryName(category)
+      )
+    ),
+  ].slice(0, 6);
+  const popularProducts = availableProducts.slice(0, 8);
   const scrollToProducts = () => {
     setSelectedCategory('All');
     requestAnimationFrame(() => {
@@ -209,7 +218,7 @@ export function Home() {
     });
   };
 
-  const addProductToCustomerCart = (product: Product) => {
+  const addProductToCustomerCart = (product: Product, quantity = 1) => {
     const storedUser = localStorage.getItem('user');
     let parsedUser: StoredUser | null = null;
 
@@ -246,10 +255,10 @@ export function Home() {
       cart[existingIndex] = {
         ...cart[existingIndex],
         product,
-        quantity: Math.min(currentQuantity + 1, maxStock),
+        quantity: Math.min(currentQuantity + Math.max(1, quantity), maxStock),
       };
     } else {
-      cart.push({ product, quantity: 1 });
+      cart.push({ product, quantity: Math.min(Math.max(1, quantity), Number(product.stock) || 1) });
     }
 
     localStorage.setItem('customer_cart', JSON.stringify(cart));
@@ -267,11 +276,41 @@ export function Home() {
     <div ref={ref} className="bg-[#f6faf7]">
       <main>
         <Hero
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onSearchSubmit={scrollToProducts}
-          heroProduct={heroProduct}
+          onShopProductsClick={scrollToProducts}
+          supportHref="/login"
+          onSupportClick={rememberCustomerMessagesRedirect}
         />
+
+        <section aria-label="First order promotion" className="border-y border-emerald-900/10 bg-[#0b3b23]">
+          <div className="mx-auto max-w-7xl px-5 py-5 md:px-8 md:py-6">
+            <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(110deg,#0b3b23_0%,#106333_58%,#16a34a_100%)] px-5 py-6 text-white shadow-[0_24px_55px_-38px_rgba(5,46,22,0.95)] sm:px-7 lg:flex lg:items-center lg:justify-between lg:gap-8">
+              <div aria-hidden className="absolute -right-16 -top-24 h-64 w-64 rounded-full border-[34px] border-white/5" />
+              <div className="relative flex max-w-3xl items-start gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/12 text-emerald-100 ring-1 ring-white/15">
+                  <BadgePercent className="h-6 w-6" />
+                </span>
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-emerald-200">New customer welcome offer</p>
+                  <h2 className="mt-1 font-display text-2xl font-extrabold tracking-tight sm:text-3xl">20% OFF your first order</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-emerald-50/85">
+                    New Rayjin Hardware customers receive 20% off their first online order when the product subtotal reaches ₱1,000. The offer is applied automatically at checkout and can be used once.
+                  </p>
+                </div>
+              </div>
+
+              <div className="relative mt-5 flex shrink-0 flex-wrap items-center gap-3 lg:mt-0 lg:justify-end">
+                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-bold text-emerald-50">Minimum ₱1,000</span>
+                <Link
+                  to="/register/customer"
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#0b3b23] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50"
+                >
+                  Create Account
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section aria-label="Store shopping benefits" className="border-b border-[#dfe9e2] bg-white">
           <div className="mx-auto grid max-w-7xl grid-cols-1 divide-y divide-[#e7efe9] px-5 sm:grid-cols-2 sm:divide-x sm:divide-y-0 md:px-8 lg:grid-cols-4">
@@ -294,76 +333,35 @@ export function Home() {
           </div>
         </section>
 
-        <section id="categories" className="scroll-mt-24 py-10 md:py-14">
+        <section className="py-10 md:py-14" aria-label="Popular products this week">
           <div className="mx-auto max-w-7xl px-5 md:px-8">
-            <div className="rounded-3xl border border-[#e2ebe5] bg-white p-6 shadow-sm sm:p-7">
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-700">
-                  Find what you need faster
-                </p>
-                <h2 className="mt-1 font-display text-2xl font-extrabold text-[#17372d]">
-                  Shop by Categories
-                </h2>
-                <p className="mt-2 max-w-2xl text-xs leading-5 text-[#61766d]">
-                  Start with a featured category, or browse the full product catalog and use the existing category filters.
-                </p>
+            <PopularProducts
+              onSelect={(popular: PopularProduct) => {
+                const liveProduct = products.find((product) => Number(product.id) === Number(popular.id));
+                if (liveProduct) {
+                  setSelectedProduct(liveProduct);
+                  setDetailsQuantity(1);
+                }
+              }}
+            />
+          </div>
+        </section>
+
+        <section className="py-10 md:py-14">
+          <div className="mx-auto max-w-7xl px-5 md:px-8">
+            {featuredCategories.length > 0 ? (
+              <PremiumCategoryShowcase
+                id="categories"
+                categories={featuredCategories}
+                products={availableProducts}
+                onSelect={handleCategorySelect}
+                onBrowseAll={() => handleCategorySelect('All')}
+              />
+            ) : !loading ? (
+              <div id="categories" className="scroll-mt-24 rounded-3xl border border-dashed border-emerald-200 bg-[#f8fbf9] p-8 text-center text-sm text-[#61766d]">
+                No active categories are available yet.
               </div>
-
-              {featuredCategories.length > 0 ? (
-                <>
-                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {featuredCategories.map((category) => {
-                      const categoryCount = availableProducts.filter((product) => product.category === category).length;
-
-                      return (
-                        <button
-                          key={category}
-                          type="button"
-                          onClick={() => handleCategorySelect(category)}
-                          className="group overflow-hidden rounded-3xl border border-[#e3ece6] bg-white text-left shadow-[0_14px_32px_-24px_rgba(11,59,35,0.62)] transition-all duration-300 hover:-translate-y-1.5 hover:border-emerald-300 hover:shadow-[0_24px_42px_-26px_rgba(11,59,35,0.52)]"
-                        >
-                          <span className="relative flex h-56 items-center justify-center overflow-hidden bg-[#f5f8f6] sm:h-60">
-                            <img
-                              src={getFeaturedCategoryImage(category)}
-                              alt={`${category} category`}
-                              className="h-full w-full object-contain p-2 transition-transform duration-500 group-hover:scale-[1.025]"
-                            />
-                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/10 to-transparent" />
-                          </span>
-
-                          <span className="block border-t border-[#edf2ee] bg-white p-4">
-                            <span className="block text-sm font-extrabold uppercase tracking-wide text-[#17372d]">
-                              {category}
-                            </span>
-                            <span className="mt-1 block text-[11px] text-[#61766d]">
-                              {categoryCount} available product{categoryCount === 1 ? '' : 's'}
-                            </span>
-                            <span className="mt-3 inline-flex items-center gap-1 text-[11px] font-extrabold text-[#15803d]">
-                              Explore category
-                              <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-6 flex justify-center sm:justify-end">
-                    <button
-                      type="button"
-                      onClick={() => handleCategorySelect('All')}
-                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-extrabold text-[#15803d] transition hover:border-emerald-300 hover:bg-emerald-100"
-                    >
-                      Browse Categories <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </>
-              ) : !loading ? (
-                <div className="mt-6 rounded-2xl border border-dashed border-emerald-200 bg-[#f8fbf9] p-8 text-center text-sm text-[#61766d]">
-                  No active categories are available yet.
-                </div>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </section>
 
@@ -648,52 +646,9 @@ export function Home() {
 
 
 
-        <section id="how-it-works" className="scroll-mt-24 py-14 md:py-20">
-          <div className="mx-auto max-w-7xl px-5 md:px-8">
-            <div className="text-center">
-              <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-700">Simple from browsing to completion</p>
-              <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-[#17372d]">How ordering works</h2>
-              <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-[#61766d]">
-                Browsing is public. Account access is required when you are ready to transact and track your order.
-              </p>
-            </div>
+        <StorefrontOrderingJourney />
 
-            <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {[
-                { icon: <Search className="h-5 w-5" />, title: '1. Browse', text: 'Explore live products and categories without signing in.' },
-                { icon: <LogIn className="h-5 w-5" />, title: '2. Login or Register', text: 'Sign in before adding products to your cart and placing an order.' },
-                { icon: <Truck className="h-5 w-5" />, title: '3. Choose Fulfillment', text: 'Select pickup, local delivery, or Shop & Go during checkout.' },
-                { icon: <ClipboardCheck className="h-5 w-5" />, title: '4. Track Your Order', text: 'Follow approval, payment, and fulfillment updates in My Orders.' },
-              ].map((step) => (
-                <article key={step.title} className="rounded-2xl border border-[#dfe9e2] bg-white p-6 shadow-[0_10px_30px_-24px_rgba(11,59,35,0.65)]">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#eaf6ef] text-[#15803d]">
-                    {step.icon}
-                  </span>
-                  <h3 className="mt-4 text-sm font-extrabold text-[#17372d]">{step.title}</h3>
-                  <p className="mt-2 text-xs leading-6 text-[#61766d]">{step.text}</p>
-                </article>
-              ))}
-            </div>
-
-            {!user && (
-              <div className="mt-10 flex flex-col items-center justify-between gap-5 rounded-3xl bg-[#0b3b23] px-7 py-8 text-white shadow-xl shadow-emerald-950/10 sm:flex-row sm:px-10">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">Ready to order?</p>
-                  <h3 className="mt-2 font-display text-2xl font-extrabold">Create your Rayjin Hardware customer account.</h3>
-                  <p className="mt-2 text-sm text-emerald-100">Registration is for customers. Admin accounts remain restricted to authorized setup.</p>
-                </div>
-                <div className="flex shrink-0 gap-3">
-                  <Link to="/login" className="rounded-xl border border-white/20 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10">
-                    Login
-                  </Link>
-                  <Link to="/register/customer" className="rounded-xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 transition hover:bg-emerald-300">
-                    Register Account
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+        <StorefrontConversionHub isCustomerSignedIn={user?.role === 'customer'} />
       </main>
 
       {addedMessage && (
@@ -702,59 +657,17 @@ export function Home() {
         </div>
       )}
 
-      {selectedProduct && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={() => setSelectedProduct(null)}>
-          <div
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-[#e8efea] px-6 py-5">
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-emerald-700">{selectedProduct.category}</p>
-                <h3 className="mt-1 font-display text-xl font-extrabold text-[#17372d]">Product Details</h3>
-              </div>
-              <button type="button" onClick={() => setSelectedProduct(null)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100" aria-label="Close product details">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid gap-6 p-6 sm:grid-cols-[0.9fr_1.1fr]">
-              <div className="flex min-h-64 items-center justify-center rounded-2xl bg-[#f4f8f5] p-6">
-                {isUsableProductImage(selectedProduct.image) ? (
-                  <img src={String(selectedProduct.image)} alt={selectedProduct.name} className="max-h-56 w-full object-contain" />
-                ) : (
-                  <Package className="h-20 w-20 text-emerald-300" />
-                )}
-              </div>
-
-              <div>
-                {selectedProduct.brand && <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">{selectedProduct.brand}</p>}
-                <h4 className="mt-1 text-2xl font-extrabold leading-tight text-[#17372d]">{selectedProduct.name}</h4>
-                <p className="mt-4 text-2xl font-extrabold text-[#15803d]">₱{Number(selectedProduct.price).toFixed(2)}</p>
-                <div className="mt-4 inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
-                  {Number(selectedProduct.stock)}{displayStockUnit(selectedProduct)} available
-                </div>
-                <p className="mt-5 text-sm leading-7 text-[#61766d]">
-                  {selectedProduct.description?.trim() || 'Product information is available from the current Rayjin Hardware catalog.'}
-                </p>
-                {selectedProduct.unit && (
-                  <p className="mt-3 text-xs font-semibold text-[#4f675d]">Unit of measurement: <span className="font-extrabold text-[#17372d]">{selectedProduct.unit}</span></p>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    addProductToCustomerCart(selectedProduct);
-                    if (user?.role === 'customer') setSelectedProduct(null);
-                  }}
-                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white transition hover:bg-[#166534]"
-                >
-                  <ShoppingCart className="h-4 w-4" /> Add to Cart
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ProductDetailsModal
+        product={selectedProduct}
+        quantity={detailsQuantity}
+        onQuantityChange={setDetailsQuantity}
+        onClose={() => setSelectedProduct(null)}
+        onAddToCart={(quantity) => {
+          if (!selectedProduct) return;
+          addProductToCustomerCart(selectedProduct, quantity);
+          if (user?.role === 'customer') setSelectedProduct(null);
+        }}
+      />
 
       {loginPromptProduct && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={() => setLoginPromptProduct(null)}>

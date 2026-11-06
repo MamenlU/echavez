@@ -7,7 +7,27 @@ import {
     requireAdmin
 } from '../middleware/auth.js';
 
+import { sendAdminOrderNotification } from '../lib/adminOrderNotificationEmail.js';
+import {
+    safeCreateOrderSystemMessage,
+    syncAdminOrderMessageToConversation
+} from '../lib/messageService.js';
+import {
+    buildOrderStatusSystemMessage,
+    orderStatusEventKey
+} from '../lib/orderSystemMessages.js';
+import {
+    SUPPORTED_DELIVERY_AREAS,
+    SUPPORTED_DELIVERY_MUNICIPALITIES,
+    normalizeDeliveryMunicipality,
+    normalizeDeliveryBarangay
+} from '../lib/deliveryAreas.js';
+
 const router = express.Router();
+
+const FIRST_ORDER_DISCOUNT_PERCENT = 20;
+const FIRST_ORDER_DISCOUNT_MINIMUM = 1000;
+const PAYMENT_REVIEW_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 async function expirePayMongoCheckoutSession(sessionId) {
     const cleanSessionId = String(sessionId || '').trim();
@@ -111,19 +131,134 @@ async function expirePayMongoCheckoutSession(sessionId) {
 
 const FINAL_ORDER_STATUSES = ['completed', 'cancelled', 'rejected'];
 
+const COMPLETION_CUSTOMER_MESSAGE =
+    'Thank you for your purchase from Rayjin Hardware! Your order has been successfully completed. We appreciate your business and look forward to serving you again.';
+
 async function recordOrderHistory(
     connection,
     { orderId, fromStatus, toStatus, adminId, note = null }
 ) {
-    await connection.query(
+    const [result] = await connection.query(
         `INSERT INTO order_status_history
          (order_id, from_status, to_status, admin_id, note)
          VALUES (?, ?, ?, ?, ?)`,
         [orderId, fromStatus || null, toStatus, adminId || null, note || null]
     );
+
+    return Number(result?.insertId || 0) || null;
 }
 
-// Get active Initao delivery rates.
+const PAID_ONLINE_ORDER_LOCK_MESSAGE =
+    'This order has a successfully verified PayMongo payment. Reject and Cancel actions are unavailable because refund processing is not supported by this system.';
+
+const ONLINE_PAYMENT_METHODS = [
+    'card',
+    'gcash',
+    'paymongo'
+];
+
+async function hasVerifiedPaidOnlinePayment(
+    connection,
+    order
+) {
+    const paymentMethod =
+        String(
+            order.payment_method || ''
+        )
+            .trim()
+            .toLowerCase();
+
+    if (
+        !ONLINE_PAYMENT_METHODS.includes(
+            paymentMethod
+        )
+    ) {
+        return false;
+    }
+
+    const orderMarkedPaid =
+        String(
+            order.payment_status || ''
+        )
+            .trim()
+            .toLowerCase() === 'paid';
+
+    const [verifiedPayments] =
+        await connection.query(
+            `
+                SELECT payment_id
+                FROM payments
+                WHERE order_id = ?
+                  AND payment_status = 'Paid'
+                  AND gateway_transaction_id IS NOT NULL
+                  AND verified_at IS NOT NULL
+                LIMIT 1
+            `,
+            [order.id]
+        );
+
+    return (
+        orderMarkedPaid ||
+        verifiedPayments.length > 0
+    );
+}
+
+// Return only customer-facing Admin messages from the existing
+// order_status_history table.
+//
+// A normal Admin message is recorded without changing the
+// operational order status, so from_status === to_status.
+//
+// Internal/system history such as:
+// - Customer placed the order
+// - Payment verified
+// - normal status transitions
+// - "Admin message cleared"
+// is intentionally excluded.
+async function getOrderMessageHistory(orderId) {
+    const [rows] = await pool.query(
+        `
+        SELECT
+            history_id,
+            note AS message,
+            created_at
+        FROM order_status_history
+        WHERE order_id = ?
+          AND admin_id IS NOT NULL
+          AND (
+                from_status = to_status
+                OR to_status IN ('failed_delivery', 'deactivated', 'cancelled')
+                OR from_status IN ('failed_delivery', 'deactivated')
+              )
+          AND note IS NOT NULL
+          AND TRIM(note) <> ''
+          AND note <> 'Admin message cleared'
+        ORDER BY created_at ASC, history_id ASC
+        `,
+        [orderId]
+    );
+
+    return rows.map(row => ({
+        id: row.history_id,
+        message: row.message,
+        created_at: row.created_at
+    }));
+}
+
+// Return the approved delivery coverage. This contains geographic names only;
+// pricing remains controlled by delivery_rates.
+router.get(
+    '/delivery-areas',
+    authenticateToken,
+    async (req, res) => {
+        res.json({
+            municipalities: SUPPORTED_DELIVERY_MUNICIPALITIES,
+            barangays: SUPPORTED_DELIVERY_AREAS
+        });
+    }
+);
+
+// Get active delivery rates for the approved municipalities.
 router.get(
     '/delivery-rates',
     authenticateToken,
@@ -131,10 +266,11 @@ router.get(
         try {
             const [rates] = await pool.query(
                 `
-                SELECT barangay, zone, surcharge
+                SELECT municipality, barangay, zone, surcharge
                 FROM delivery_rates
                 WHERE is_active = 1
-                ORDER BY surcharge ASC, barangay ASC
+                  AND municipality IN ('Initao', 'Libertad', 'Naawan', 'Gitagum')
+                ORDER BY municipality ASC, surcharge ASC, barangay ASC
                 `
             );
 
@@ -165,13 +301,15 @@ router.get(
                 `
                 SELECT
                     id,
+                    municipality,
                     barangay,
                     zone,
                     surcharge,
                     is_active,
                     updated_at
                 FROM delivery_rates
-                ORDER BY surcharge ASC, barangay ASC
+                WHERE municipality IN ('Initao', 'Libertad', 'Naawan', 'Gitagum')
+                ORDER BY municipality ASC, barangay ASC
                 `
             );
 
@@ -189,7 +327,101 @@ router.get(
     }
 );
 
-// Update one barangay's zone, surcharge, and availability.
+// Add one municipality + barangay delivery-rate configuration.
+// The Admin supplies the surcharge; no delivery price is invented by the system.
+router.post(
+    '/delivery-rates',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+        try {
+            const municipality = normalizeDeliveryMunicipality(req.body.municipality);
+            const barangay = normalizeDeliveryBarangay(
+                municipality,
+                req.body.barangay
+            );
+            const zone = String(req.body.zone || '').trim().toLowerCase();
+            const surcharge = Number(req.body.surcharge);
+            const allowedZones = ['poblacion', 'near', 'medium', 'far'];
+
+            if (!municipality) {
+                return res.status(400).json({
+                    error: 'Select one of the approved delivery municipalities.'
+                });
+            }
+
+            if (!barangay) {
+                return res.status(400).json({
+                    error: 'Select a valid barangay for the chosen municipality.'
+                });
+            }
+
+            if (!allowedZones.includes(zone)) {
+                return res.status(400).json({
+                    error: 'Select a valid delivery zone.'
+                });
+            }
+
+            if (!Number.isFinite(surcharge) || surcharge < 0 || surcharge > 5000) {
+                return res.status(400).json({
+                    error: 'Barangay surcharge must be from ₱0 to ₱5,000.'
+                });
+            }
+
+            const isActive =
+                req.body.is_active === true ||
+                req.body.is_active === 1 ||
+                req.body.is_active === '1';
+
+            const [existingRows] = await pool.query(
+                `SELECT id
+                 FROM delivery_rates
+                 WHERE municipality = ? AND barangay = ?
+                 LIMIT 1`,
+                [municipality, barangay]
+            );
+
+            if (existingRows.length) {
+                return res.status(409).json({
+                    error: `${barangay}, ${municipality} already has a delivery-rate record.`
+                });
+            }
+
+            const [result] = await pool.query(
+                `INSERT INTO delivery_rates
+                    (municipality, barangay, zone, surcharge, is_active)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [municipality, barangay, zone, surcharge, isActive ? 1 : 0]
+            );
+
+            const [rows] = await pool.query(
+                `SELECT id, municipality, barangay, zone, surcharge, is_active, updated_at
+                 FROM delivery_rates
+                 WHERE id = ?`,
+                [result.insertId]
+            );
+
+            return res.status(201).json({
+                message: 'Delivery area added successfully.',
+                rate: rows[0]
+            });
+        } catch (err) {
+            console.error('Error adding delivery rate:', err);
+
+            if (err.code === 'ER_DUP_ENTRY') {
+                return res.status(409).json({
+                    error: 'That municipality and barangay combination already exists.'
+                });
+            }
+
+            return res.status(500).json({
+                error: 'Failed to add the delivery area.'
+            });
+        }
+    }
+);
+
+// Update one configured area's zone, surcharge, and availability.
 router.put(
     '/delivery-rates/:id',
     authenticateToken,
@@ -258,6 +490,7 @@ router.put(
                 `
                 SELECT
                     id,
+                    municipality,
                     barangay,
                     zone,
                     surcharge,
@@ -327,7 +560,11 @@ router.get(
             for (let order of orders) {
                 const [items] = await pool.query(
                     `
-                    SELECT oi.quantity, oi.price, p.*
+                    SELECT
+                        oi.quantity,
+                        oi.price AS order_item_price,
+                        oi.subtotal AS order_item_subtotal,
+                        p.*
                     FROM order_items oi
                     JOIN products p ON oi.product_id = p.id
                     WHERE oi.order_id = ?
@@ -337,6 +574,8 @@ router.get(
 
                 order.items = items.map(item => ({
                     quantity: item.quantity,
+                    order_item_price: item.order_item_price,
+                    order_item_subtotal: item.order_item_subtotal,
                     product: {
                         id: item.id,
                         name: item.name,
@@ -347,6 +586,9 @@ router.get(
                         brand: item.brand
                     }
                 }));
+
+                order.message_history =
+    await getOrderMessageHistory(order.id);
             }
 
             res.json(orders);
@@ -359,6 +601,60 @@ router.get(
 
             res.status(500).json({
                 error: 'Failed to fetch all orders'
+            });
+        }
+    }
+);
+
+// First-order promotion eligibility for the authenticated customer.
+// The backend remains authoritative; frontend values are display-only.
+router.get(
+    '/discount/eligibility',
+    authenticateToken,
+    async (req, res) => {
+        try {
+            if (req.user.role !== 'customer') {
+                return res.status(403).json({
+                    error: 'First-order discount eligibility is available to customer accounts only.'
+                });
+            }
+
+            const [users] = await pool.query(
+                `SELECT first_order_discount_used
+                 FROM users
+                 WHERE id = ?
+                   AND role = 'customer'
+                 LIMIT 1`,
+                [req.user.id]
+            );
+
+            if (!users.length) {
+                return res.status(404).json({
+                    error: 'Customer account was not found.'
+                });
+            }
+
+            const [orderCounts] = await pool.query(
+                `SELECT COUNT(*) AS order_count
+                 FROM orders
+                 WHERE user_id = ?`,
+                [req.user.id]
+            );
+
+            const priorOrderCount = Number(orderCounts[0]?.order_count || 0);
+            const promotionUsed = Number(users[0].first_order_discount_used || 0) === 1;
+
+            res.json({
+                eligible: !promotionUsed && priorOrderCount === 0,
+                firstOrderDiscountUsed: promotionUsed,
+                priorOrderCount,
+                discountPercent: FIRST_ORDER_DISCOUNT_PERCENT,
+                minimumSubtotal: FIRST_ORDER_DISCOUNT_MINIMUM
+            });
+        } catch (error) {
+            console.error('First-order discount eligibility error:', error);
+            res.status(500).json({
+                error: 'Unable to check the first-order discount right now.'
             });
         }
     }
@@ -411,6 +707,8 @@ router.get(
                         brand: item.brand
                     }
                 }));
+                order.message_history =
+    await getOrderMessageHistory(order.id);
             }
 
             res.json(orders);
@@ -440,10 +738,13 @@ router.post('/', authenticateToken, async (req, res) => {
     requestedPickupTime,
     deliveryContactPerson,
     deliveryContactNumber,
+    deliveryMunicipality,
     deliveryBarangay,
     deliveryAddress,
     deliveryLandmark,
-    deliveryInstructions
+    deliveryInstructions,
+    deliveryLatitude,
+    deliveryLongitude
 } = req.body;
 
     // Admin accounts must not create customer orders through this route.
@@ -615,95 +916,144 @@ if (fulfillment === 'shop_go')
 
 let deliveryContactPersonForDatabase = null;
 let deliveryContactNumberForDatabase = null;
+let deliveryMunicipalityForDatabase = null;
 let deliveryBarangayForDatabase = null;
 let deliveryAddressForDatabase = null;
 let deliveryLandmarkForDatabase = null;
 let deliveryInstructionsForDatabase = null;
+let deliveryLatitudeForDatabase = null;
+let deliveryLongitudeForDatabase = null;
 
 if (fulfillment === 'delivery') {
-    const cleanContactPerson =
-        String(deliveryContactPerson || '').trim();
+    const cleanContactPerson = String(deliveryContactPerson || '').trim();
+    const cleanContactNumber = String(deliveryContactNumber || '').trim();
+    const cleanAddress = String(deliveryAddress || '').trim();
+    const cleanLandmark = String(deliveryLandmark || '').trim();
+    const cleanInstructions = String(deliveryInstructions || '').trim();
 
-    const cleanContactNumber =
-        String(deliveryContactNumber || '').trim();
-
-    const cleanBarangay =
-        String(deliveryBarangay || '').trim();
-
-    const cleanAddress =
-        String(deliveryAddress || '').trim();
-
-    const cleanLandmark =
-        String(deliveryLandmark || '').trim();
-
-    const cleanInstructions =
-        String(deliveryInstructions || '').trim();
+    const matchedMunicipality = normalizeDeliveryMunicipality(deliveryMunicipality);
+    const matchedBarangay = normalizeDeliveryBarangay(
+        matchedMunicipality,
+        deliveryBarangay
+    );
 
     if (
         !cleanContactPerson ||
         !cleanContactNumber ||
-        !cleanBarangay ||
+        !matchedMunicipality ||
+        !matchedBarangay ||
         !cleanAddress
     ) {
         return res.status(400).json({
             error:
-                'Contact person, contact number, barangay, and complete delivery address are required.'
+                'Contact person, contact number, municipality, barangay, and complete delivery address are required.'
         });
     }
-
-    const allowedInitaoBarangays = [
-    'Aluna',
-    'Andales',
-    'Apas',
-    'Calacapan',
-    'Gimangpang',
-    'Jampason',
-    'Kamelon',
-    'Kanitoan',
-    'Oguis',
-    'Pagahan',
-    'Poblacion',
-    'Pontacon',
-    'San Pedro',
-    'Sinalac',
-    'Tawantawan',
-    'Tubigan'
-];
-
-const matchedBarangay = allowedInitaoBarangays.find(
-    barangay =>
-        barangay.toLowerCase() === cleanBarangay.toLowerCase()
-);
-
-if (!matchedBarangay) {
-    return res.status(400).json({
-        error:
-            'Delivery is currently available only within Initao, Misamis Oriental.'
-    });
-}
 
     const normalizedDeliveryPhone =
         cleanContactNumber.replace(/[\s\-()]/g, '');
 
     if (!/^\+?\d{7,15}$/.test(normalizedDeliveryPhone)) {
         return res.status(400).json({
-            error:
-                'Please provide a valid delivery contact number.'
+            error: 'Please provide a valid delivery contact number.'
         });
+    }
+
+    const latitudeProvided =
+        deliveryLatitude !== null &&
+        deliveryLatitude !== undefined &&
+        String(deliveryLatitude).trim() !== '';
+    const longitudeProvided =
+        deliveryLongitude !== null &&
+        deliveryLongitude !== undefined &&
+        String(deliveryLongitude).trim() !== '';
+
+        if (!latitudeProvided && !longitudeProvided) {
+    return res.status(400).json({
+        error:
+            'Please select and confirm the exact delivery location on the map.'
+    });
+}
+
+    if (latitudeProvided !== longitudeProvided) {
+        return res.status(400).json({
+            error: 'Both delivery latitude and longitude must be provided together.'
+        });
+    }
+
+    if (latitudeProvided && longitudeProvided) {
+        const coordinateInputsArePrimitive =
+            ['number', 'string'].includes(typeof deliveryLatitude) &&
+            ['number', 'string'].includes(typeof deliveryLongitude);
+
+        if (!coordinateInputsArePrimitive) {
+            return res.status(400).json({
+                error: 'The selected delivery map location is invalid.'
+            });
+        }
+
+        const latitude = Number(deliveryLatitude);
+        const longitude = Number(deliveryLongitude);
+if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 || latitude > 90 ||
+    longitude < -180 || longitude > 180
+) {
+    return res.status(400).json({
+        error: 'The selected delivery map location is invalid.'
+    });
+}
+
+        deliveryLatitudeForDatabase = Number(latitude.toFixed(7));
+        deliveryLongitudeForDatabase = Number(longitude.toFixed(7));
     }
 
     deliveryContactPersonForDatabase = cleanContactPerson;
     deliveryContactNumberForDatabase = cleanContactNumber;
+    deliveryMunicipalityForDatabase = matchedMunicipality;
     deliveryBarangayForDatabase = matchedBarangay;
     deliveryAddressForDatabase = cleanAddress;
     deliveryLandmarkForDatabase = cleanLandmark || null;
     deliveryInstructionsForDatabase = cleanInstructions || null;
-}   
+}
 
     const connection = await pool.getConnection();
 
     try {
         await connection.beginTransaction();
+
+        // Lock the customer row so two simultaneous checkout requests cannot
+        // both claim the one-time first-order promotion.
+        const [promotionUsers] = await connection.query(
+            `SELECT id, first_order_discount_used
+             FROM users
+             WHERE id = ?
+               AND role = 'customer'
+             LIMIT 1
+             FOR UPDATE`,
+            [orderUserId]
+        );
+
+        if (!promotionUsers.length) {
+            const accountError = new Error('Customer account was not found.');
+            accountError.statusCode = 404;
+            throw accountError;
+        }
+
+        const [previousOrderRows] = await connection.query(
+            `SELECT COUNT(*) AS order_count
+             FROM orders
+             WHERE user_id = ?`,
+            [orderUserId]
+        );
+
+        const priorOrderCount = Number(previousOrderRows[0]?.order_count || 0);
+        const promotionAlreadyUsed =
+            Number(promotionUsers[0].first_order_discount_used || 0) === 1;
+
+        const firstOrderPromotionAvailable =
+            !promotionAlreadyUsed && priorOrderCount === 0;
 
         const orderId = `ORD-${randomUUID()
     .replace(/-/g, '')
@@ -726,12 +1076,15 @@ await connection.query(
         requested_pickup_time,
         delivery_contact_person,
         delivery_contact_number,
+        delivery_municipality,
         delivery_barangay,
         delivery_address,
         delivery_landmark,
-        delivery_instructions
+        delivery_instructions,
+        delivery_latitude,
+        delivery_longitude
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
         orderId,
@@ -746,10 +1099,13 @@ await connection.query(
         pickupTimeForDatabase,
         deliveryContactPersonForDatabase,
         deliveryContactNumberForDatabase,
+        deliveryMunicipalityForDatabase,
         deliveryBarangayForDatabase,
         deliveryAddressForDatabase,
         deliveryLandmarkForDatabase,
-        deliveryInstructionsForDatabase
+        deliveryInstructionsForDatabase,
+        deliveryLatitudeForDatabase,
+        deliveryLongitudeForDatabase
     ]
 );
 
@@ -769,6 +1125,7 @@ await connection.query(
         // officially changed to "completed".
         let calculatedTotal = 0;
 let deliveryLoadClass = 'light';
+let deliveryOnlyChargeableQuantity = 0;
 
 const deliveryClassRank = {
     light: 1,
@@ -790,7 +1147,7 @@ const deliveryClassRank = {
             // Lock/read the product while this transaction is running.
             const [products] = await connection.query(
                 `SELECT id, name, price, stock,
-                       delivery_class, bulk_quantity_threshold
+                       delivery_class, bulk_quantity_threshold, fulfillment_rule
                  FROM products
                  WHERE id = ?
                  FOR UPDATE`,
@@ -804,6 +1161,26 @@ const deliveryClassRank = {
             }
 
             const product = products[0];
+
+            // Server-side fulfillment authority: never trust the browser's
+            // product metadata. A single Delivery-only item makes the entire
+            // order Delivery-only.
+            if (
+                product.fulfillment_rule === 'delivery_only' &&
+                fulfillment !== 'delivery'
+            ) {
+                const fulfillmentError = new Error(
+                    `${product.name} is Delivery-only. This cart must use Delivery.`
+                );
+                fulfillmentError.statusCode = 400;
+                throw fulfillmentError;
+            }
+
+            // Delivery-only Products are separately chargeable Delivery units.
+            // Their validated database quantity determines the Delivery multiplier.
+            if (product.fulfillment_rule === 'delivery_only') {
+                deliveryOnlyChargeableQuantity += quantity;
+            }
 
             let productDeliveryClass =
     ['light', 'standard', 'bulky'].includes(
@@ -878,6 +1255,23 @@ if (
     throw minimumOrderError;
 }
 
+const originalSubtotalForDatabase = calculatedTotal;
+
+const discountAmountForDatabase =
+    firstOrderPromotionAvailable &&
+    originalSubtotalForDatabase >= FIRST_ORDER_DISCOUNT_MINIMUM
+        ? Number(
+            (
+                originalSubtotalForDatabase *
+                (FIRST_ORDER_DISCOUNT_PERCENT / 100)
+            ).toFixed(2)
+        )
+        : 0;
+
+const discountedProductTotal = Number(
+    (originalSubtotalForDatabase - discountAmountForDatabase).toFixed(2)
+);
+
 let deliveryFeeForDatabase = null;
 let deliveryLoadClassForDatabase = null;
 const serviceFeeForDatabase = fulfillment === 'shop_go' ? 50 : 0;
@@ -887,16 +1281,17 @@ if (fulfillment === 'delivery') {
         `
         SELECT surcharge
         FROM delivery_rates
-        WHERE barangay = ?
+        WHERE municipality = ?
+          AND barangay = ?
           AND is_active = 1
         LIMIT 1
         `,
-        [deliveryBarangayForDatabase]
+        [deliveryMunicipalityForDatabase, deliveryBarangayForDatabase]
     );
 
     if (deliveryRates.length === 0) {
         const deliveryRateError = new Error(
-            'Delivery is not available for the selected barangay.'
+            'Delivery is not available for the selected municipality and barangay.'
         );
 
         deliveryRateError.statusCode = 400;
@@ -919,10 +1314,19 @@ if (fulfillment === 'delivery') {
     deliveryLoadClassForDatabase =
         deliveryLoadClass;
 
+    // Normal Delivery carts are charged once per order. When the cart contains
+    // Delivery-only Products, each validated Delivery-only quantity is treated
+    // as a separately chargeable Delivery unit. Both the load-class base fee
+    // and active municipality/barangay surcharge use the same multiplier.
+    const deliveryChargeMultiplier =
+        deliveryOnlyChargeableQuantity > 0
+            ? deliveryOnlyChargeableQuantity
+            : 1;
+
     deliveryFeeForDatabase = Number(
         (
-            baseFee +
-            barangaySurcharge
+            (baseFee + barangaySurcharge) *
+            deliveryChargeMultiplier
         ).toFixed(2)
     );
 }
@@ -931,6 +1335,8 @@ await connection.query(
     `
     UPDATE orders
     SET
+        original_subtotal = ?,
+        discount_amount = ?,
         total = ?,
         service_fee = ?,
         delivery_fee = ?,
@@ -938,27 +1344,57 @@ await connection.query(
     WHERE id = ?
     `,
     [
-        calculatedTotal,
+        originalSubtotalForDatabase,
+        discountAmountForDatabase,
+        discountedProductTotal,
         serviceFeeForDatabase,
         deliveryFeeForDatabase,
         deliveryLoadClassForDatabase,
         orderId
     ]
 );
+
+// A first-order promotion opportunity belongs only to the first successfully
+// created order. A first order below the minimum does not make a later order
+// a first order, so the opportunity is consumed when that first order commits.
+if (firstOrderPromotionAvailable) {
+    await connection.query(
+        `UPDATE users
+         SET first_order_discount_used = 1
+         WHERE id = ?`,
+        [orderUserId]
+    );
+}
+
         await connection.commit();
 
-        res.status(201).json({
+// Notify active Admin account(s) only after the complete
+// customer order has been successfully committed.
+await sendAdminOrderNotification({
+    type: 'NEW_ORDER',
+    orderId
+});
+
+res.status(201).json({
     message:
         'Order placed successfully. Inventory will be updated when the order is completed.',
     orderId,
-    productTotal: calculatedTotal,
+    originalSubtotal: originalSubtotalForDatabase,
+    discountAmount: discountAmountForDatabase,
+    discountPercent:
+        discountAmountForDatabase > 0
+            ? FIRST_ORDER_DISCOUNT_PERCENT
+            : 0,
+    discountApplied: discountAmountForDatabase > 0,
+    firstOrderPromotionConsumed: firstOrderPromotionAvailable,
+    productTotal: discountedProductTotal,
     serviceFee: serviceFeeForDatabase,
     deliveryFee: deliveryFeeForDatabase,
     deliveryLoadClass:
         deliveryLoadClassForDatabase,
     grandTotal: Number(
         (
-            calculatedTotal +
+            discountedProductTotal +
             serviceFeeForDatabase +
             (deliveryFeeForDatabase ?? 0)
         ).toFixed(2)
@@ -1017,10 +1453,9 @@ router.put(
             const { id } = req.params;
 
             const {
-                scheduledPickupDate,
-                scheduledPickupTime,
-                adminMessage
-            } = req.body;
+    scheduledPickupDate,
+    scheduledPickupTime
+} = req.body;
 
             // -----------------------------------------
             // Required schedule validation
@@ -1059,17 +1494,6 @@ router.put(
                         'Invalid pickup time format.'
                 });
             }
-
-            const cleanAdminMessage =
-                String(adminMessage || '').trim();
-
-            if (cleanAdminMessage.length > 500) {
-                return res.status(400).json({
-                    error:
-                        'Admin message cannot exceed 500 characters.'
-                });
-            }
-
 
             // -----------------------------------------
             // Check the order
@@ -1111,39 +1535,45 @@ router.put(
             }
 
 
-            // Final orders should no longer be rescheduled.
-            if (
-                order.status === 'completed' ||
-                order.status === 'rejected' ||
-                order.status === 'cancelled'
-            ) {
-                return res.status(400).json({
-                    error:
-                        'This order can no longer be rescheduled.'
+            // The final Shop & Go schedule may be created or edited
+            // only while the order is still Pending.
+            //
+            // Awaiting-payment orders are locked until PayMongo is
+            // successfully verified. Approved / Processing / Ready
+            // orders keep the confirmed schedule as a read-only
+            // historical commitment.
+            if (order.status !== 'pending') {
+                const errorMessage =
+                    order.status === 'awaiting_payment'
+                        ? 'The final Shop & Go schedule can be confirmed only after successful payment verification.'
+                        : FINAL_ORDER_STATUSES.includes(order.status)
+                            ? 'This order can no longer be rescheduled.'
+                            : 'The confirmed Shop & Go schedule is locked after the order leaves Pending status.';
+
+                return res.status(409).json({
+                    error: errorMessage
                 });
             }
 
 
             // -----------------------------------------
-            // Save final schedule + Admin message
+            // Save final schedule
             // -----------------------------------------
 
-            await pool.query(
-                `
-                UPDATE orders
-                SET
-                    scheduled_pickup_date = ?,
-                    scheduled_pickup_time = ?,
-                    admin_message = ?
-                WHERE id = ?
-                `,
-                [
-                    scheduledPickupDate,
-                    scheduledPickupTime,
-                    cleanAdminMessage || null,
-                    id
-                ]
-            );
+await pool.query(
+    `
+    UPDATE orders
+    SET
+        scheduled_pickup_date = ?,
+        scheduled_pickup_time = ?
+    WHERE id = ?
+    `,
+    [
+        scheduledPickupDate,
+        scheduledPickupTime,
+        id
+    ]
+);
 
 
             // Return the saved values.
@@ -1161,11 +1591,8 @@ router.put(
                 requestedPickupTime:
                     order.requested_pickup_time,
 
-                scheduledPickupDate,
-                scheduledPickupTime,
-
-                adminMessage:
-                    cleanAdminMessage || null
+scheduledPickupDate,
+scheduledPickupTime
             });
 
         } catch (err) {
@@ -1196,26 +1623,112 @@ router.put(
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
-            const [orders] = await connection.query(
-                'SELECT id, status FROM orders WHERE id = ? FOR UPDATE',
-                [req.params.id]
-            );
+const [orders] = await connection.query(
+    `
+    SELECT
+        id,
+        user_id,
+        status,
+        fulfillment,
+        admin_message
+    FROM orders
+    WHERE id = ?
+    FOR UPDATE
+    `,
+    [req.params.id]
+);
             if (!orders.length) {
                 await connection.rollback();
                 return res.status(404).json({ error: 'Order not found.' });
             }
 
+            if (orders[0].status === 'completed') {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: 'This completed order is closed and its customer message can no longer be changed.'
+                });
+            }
+
+            // Backward compatibility for Shop & Go:
+//
+// Before Stage 5D, a Shop & Go message was saved directly
+// through the pickup-schedule route and may not yet exist in
+// order_status_history.
+//
+// Preserve that existing customer-facing message once before
+// replacing it with a new message.
+if (
+    orders[0].fulfillment === 'shop_go' &&
+    String(orders[0].admin_message || '').trim()
+) {
+    const previousMessage =
+        String(orders[0].admin_message).trim();
+
+    const [existingHistory] =
+        await connection.query(
+            `
+            SELECT history_id
+            FROM order_status_history
+            WHERE order_id = ?
+              AND admin_id IS NOT NULL
+              AND from_status = to_status
+              AND note = ?
+            LIMIT 1
+            `,
+            [
+                req.params.id,
+                previousMessage
+            ]
+        );
+
+    if (
+        existingHistory.length === 0 &&
+        previousMessage !== cleanMessage
+    ) {
+        await recordOrderHistory(
+            connection,
+            {
+                orderId: req.params.id,
+                fromStatus:
+                    orders[0].status,
+                toStatus:
+                    orders[0].status,
+                adminId:
+                    req.user.id,
+                note:
+                    previousMessage
+            }
+        );
+    }
+}
+
             await connection.query(
                 'UPDATE orders SET admin_message = ? WHERE id = ?',
                 [cleanMessage || null, req.params.id]
             );
-            await recordOrderHistory(connection, {
+            const historyId = await recordOrderHistory(connection, {
                 orderId: req.params.id,
                 fromStatus: orders[0].status,
                 toStatus: orders[0].status,
                 adminId: req.user.id,
                 note: cleanMessage || 'Admin message cleared',
             });
+
+            // Keep the existing Fulfillment Center composer working exactly as
+            // before, while also synchronizing real customer-facing Admin
+            // messages into the new two-way messaging store. Clearing the
+            // legacy current-message field is intentionally not shown as a chat
+            // message.
+            if (cleanMessage) {
+                await syncAdminOrderMessageToConversation(connection, {
+                    orderId: req.params.id,
+                    customerId: orders[0].user_id,
+                    adminId: req.user.id,
+                    message: cleanMessage,
+                    historyId,
+                });
+            }
+
             await connection.commit();
             res.json({ message: 'Message updated successfully.', adminMessage: cleanMessage || null });
         } catch (error) {
@@ -1254,12 +1767,15 @@ router.put(
             const [orders] = await connection.query(
     `SELECT
          id,
+         user_id,
          fulfillment,
          status,
          previous_status,
          admin_message,
+         payment_method,
          payment_status,
-         paymongo_link_id
+         paymongo_link_id,
+         created_at
      FROM orders
      WHERE id = ?
      FOR UPDATE`,
@@ -1298,14 +1814,59 @@ router.put(
                 previousStatus = order.status;
                 message = reason;
             } else if (action === 'deactivate') {
-                if (order.fulfillment !== 'delivery' || ['deactivated', 'failed_delivery'].includes(order.status)) {
+                if (order.fulfillment !== 'delivery' || !['approved', 'processing'].includes(order.status)) {
                     await connection.rollback();
-                    return res.status(409).json({ error: 'Only an active delivery order can be temporarily deactivated.' });
+                    return res.status(409).json({
+                        error: 'Deactivate Order is available only while an approved Delivery order is waiting for dispatch or being prepared.'
+                    });
                 }
                 nextStatus = 'deactivated';
                 previousStatus = order.status;
                 message = reason;
             } else {
+                const isDelivery = order.fulfillment === 'delivery';
+
+                if (isDelivery && action !== 'cancel_permanently') {
+                    await connection.rollback();
+                    return res.status(409).json({ error: 'Delivery cancellations must use the permanent-cancellation action.' });
+                }
+
+                if (!isDelivery && action !== 'cancel') {
+                    await connection.rollback();
+                    return res.status(409).json({ error: 'Pickup and Shop & Go cancellations must use the standard cancellation action.' });
+                }
+
+                const normalCancellationStatuses = isDelivery
+                    ? ['approved', 'processing', 'deactivated', 'failed_delivery']
+                    : ['approved', 'processing', 'ready'];
+
+                let cancellationAllowed = normalCancellationStatuses.includes(order.status);
+
+                if (order.status === 'awaiting_payment') {
+                    const createdAt = new Date(order.created_at);
+                    const reviewPointReached =
+                        !Number.isNaN(createdAt.getTime()) &&
+                        Date.now() >= createdAt.getTime() + PAYMENT_REVIEW_WINDOW_MS;
+
+                    if (!reviewPointReached) {
+                        await connection.rollback();
+                        return res.status(409).json({
+                            error: 'This unpaid order remains active during its 48-hour payment period. Review cancellation only after the payment review point.'
+                        });
+                    }
+
+                    cancellationAllowed = true;
+                }
+
+                if (!cancellationAllowed) {
+                    await connection.rollback();
+                    return res.status(409).json({
+                        error: order.status === 'out_for_delivery'
+                            ? 'An order that is Out for Delivery must be completed or marked Failed Delivery before any recovery decision is made.'
+                            : 'Cancel Order is not available at this stage of the order workflow.'
+                    });
+                }
+
                 nextStatus = 'cancelled';
                 previousStatus = null;
                 message = reason;
@@ -1313,17 +1874,20 @@ router.put(
 
             if (nextStatus === 'cancelled') {
     // Never cancel an order that Rayjin already knows is paid.
-    if (
-        String(order.payment_status || '')
-            .toLowerCase() === 'paid'
-    ) {
-        await connection.rollback();
+    const paidOnlineOrderLocked =
+    await hasVerifiedPaidOnlinePayment(
+        connection,
+        order
+    );
 
-        return res.status(409).json({
-            error:
-                'This order is already paid. Verify the payment before cancelling it.'
-        });
-    }
+if (paidOnlineOrderLocked) {
+    await connection.rollback();
+
+    return res.status(409).json({
+        error:
+            PAID_ONLINE_ORDER_LOCK_MESSAGE
+    });
+}
 
     // If this order has an active PayMongo Checkout Session,
     // expire it before committing the Rayjin cancellation.
@@ -1375,6 +1939,28 @@ router.put(
                 adminId: req.user.id,
                 note: message,
             });
+
+            if (nextStatus === 'cancelled') {
+                const customerMessage =
+                    buildOrderStatusSystemMessage({
+                        status: nextStatus,
+                        fulfillment: order.fulfillment,
+                        reason: message,
+                    });
+
+                if (customerMessage) {
+                    await safeCreateOrderSystemMessage(connection, {
+                        orderId: req.params.id,
+                        customerId: order.user_id,
+                        message: customerMessage,
+                        eventKey: orderStatusEventKey(
+                            req.params.id,
+                            nextStatus
+                        ),
+                    }, { context: 'order cancellation' });
+                }
+            }
+
             await connection.commit();
 
             const actionMessages = {
@@ -1418,7 +2004,10 @@ router.put(
     requireAdmin,
     async (req, res) => {
             const { id } = req.params;
-const { status } = req.body;
+const {
+    status,
+    pickupOrderIdVerified
+} = req.body;
 
 // This endpoint handles ONLINE CUSTOMER ORDERS only.
 // Onsite POS sales now use POST /api/sales/pos.
@@ -1432,7 +2021,6 @@ const allowedStatuses = [
     'ready',
     'out_for_delivery',
     'completed',
-    'cancelled',
     'rejected'
 ];
 
@@ -1455,13 +2043,16 @@ const allowedStatuses = [
 const [orders] = await connection.query(
     `SELECT
         id,
+        user_id,
         status,
         total,
         fulfillment,
         payment_method,
         payment_status,
         service_fee,
-        delivery_fee
+        delivery_fee,
+        scheduled_pickup_date,
+        scheduled_pickup_time
      FROM orders
      WHERE id = ?
      FOR UPDATE`,
@@ -1499,6 +2090,31 @@ const requiresVerifiedOnlinePayment = [
     'paymongo'
 ].includes(paymentMethod);
 
+// -----------------------------------------------------
+// VERIFIED PAID ONLINE ORDER TERMINATION LOCK
+// -----------------------------------------------------
+//
+// Refund processing is outside this system's scope.
+// A successfully verified PayMongo payment must not be
+// changed to Cancelled or Rejected by an Admin action.
+
+if (
+    ['cancelled', 'rejected'].includes(
+        status
+    ) &&
+    await hasVerifiedPaidOnlinePayment(
+        connection,
+        order
+    )
+) {
+    await connection.rollback();
+
+    return res.status(409).json({
+        error:
+            PAID_ONLINE_ORDER_LOCK_MESSAGE
+    });
+}
+
 // A completed order must never be processed again.
         // This protects inventory from being deducted twice.
         if (order.status === 'completed') {
@@ -1534,13 +2150,13 @@ const requiresVerifiedOnlinePayment = [
 // processing -> out_for_delivery (Delivery)
 // ready / out_for_delivery -> completed
 //
-// Pending / awaiting-payment orders may also
-// be rejected or cancelled.
+// Pending orders may be rejected during Admin review.
+// Cancellation is handled only by the dedicated action endpoint so
+// a reason, PayMongo protection, and the 48-hour unpaid-payment rule
+// are enforced consistently.
 //
 // Inventory is still deducted ONLY when
 // the order becomes completed.
-//
-// pending orders may also be rejected or cancelled.
 // Cancelled and rejected orders are terminal and cannot be reopened.
 //
 
@@ -1552,38 +2168,50 @@ const processingNextStatus =
 const validTransitions = {
     pending: [
         'approved',
-        'rejected',
-        'cancelled'
+        'rejected'
     ],
 
-    awaiting_payment: [
-        'rejected',
-        'cancelled'
-    ],
+    awaiting_payment: [],
 
     approved: [
-        'processing',
-        'cancelled'
+        'processing'
     ],
 
     processing: [
-        processingNextStatus,
-        'cancelled'
+        processingNextStatus
     ],
 
     ready: [
-        'completed',
-        'cancelled'
+        'completed'
     ],
 
     out_for_delivery: [
-        'completed',
-        'cancelled'
+        'completed'
     ],
 
     rejected: [],
     cancelled: []
 };
+
+// Shop & Go must have a confirmed final schedule before
+// the Admin can approve it. This keeps the operational
+// workflow aligned with the Pending-only scheduling rule.
+if (
+    order.fulfillment === 'shop_go' &&
+    order.status === 'pending' &&
+    status === 'approved' &&
+    (
+        !order.scheduled_pickup_date ||
+        !order.scheduled_pickup_time
+    )
+) {
+    await connection.rollback();
+
+    return res.status(409).json({
+        error:
+            'Confirm the final Shop & Go pickup schedule before approving this order.'
+    });
+}
 
 const isNormalTransition =
     validTransitions[order.status]?.includes(status);
@@ -1595,6 +2223,31 @@ if (!isNormalTransition) {
         error:
             `Invalid order status transition: ` +
             `${order.status} -> ${status}.`
+    });
+}
+
+// -----------------------------------------------------
+// STANDARD PICKUP - CUSTOMER ARRIVAL / ORDER ID CHECK
+// -----------------------------------------------------
+//
+// Standard Pickup is processed only after the customer
+// physically arrives at the store and presents the Order ID.
+//
+// This confirmation is required only for:
+// pickup + approved -> processing
+//
+// Shop & Go and Delivery keep their existing workflows.
+if (
+    order.fulfillment === 'pickup' &&
+    order.status === 'approved' &&
+    status === 'processing' &&
+    pickupOrderIdVerified !== true
+) {
+    await connection.rollback();
+
+    return res.status(409).json({
+        error:
+            'Verify that the customer is physically present and has presented the correct Order ID before starting Standard Pickup processing.'
     });
 }
 
@@ -1935,6 +2588,12 @@ await connection.query(
                  WHEN 'cancelled' THEN 'Cancelled'
                  WHEN 'rejected' THEN 'Cancelled'
                  ELSE payment_status
+             END,
+
+         admin_message =
+             CASE
+                 WHEN ? = 'completed' THEN ?
+                 ELSE admin_message
              END
 
      WHERE id = ?`,
@@ -1942,6 +2601,8 @@ await connection.query(
         status,
         status,
         status,
+        status,
+        COMPLETION_CUSTOMER_MESSAGE,
         id
     ]
 );
@@ -1952,12 +2613,25 @@ await recordOrderHistory(connection, {
     toStatus: status,
     adminId: req.user.id,
     note:
-    order.fulfillment === 'pickup' &&
-    order.status === 'ready' &&
-    status === 'completed'
-        ? 'Standard Pickup completed after the order was released to the customer.'
-        : null,
+        status === 'completed'
+            ? COMPLETION_CUSTOMER_MESSAGE
+            : null,
 });
+
+const customerStatusMessage =
+    buildOrderStatusSystemMessage({
+        status,
+        fulfillment: order.fulfillment,
+    });
+
+if (customerStatusMessage) {
+    await safeCreateOrderSystemMessage(connection, {
+        orderId: id,
+        customerId: order.user_id,
+        message: customerStatusMessage,
+        eventKey: orderStatusEventKey(id, status),
+    }, { context: `order status ${status}` });
+}
 
 await connection.commit();
 

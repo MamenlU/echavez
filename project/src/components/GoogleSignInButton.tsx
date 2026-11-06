@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { consumePostAuthRedirect } from '../utils/postAuthRedirect';
 
 declare global {
   interface Window {
@@ -192,9 +193,7 @@ export function GoogleSignInButton({
       );
 
       navigate(
-        user.role === 'admin'
-          ? '/admin/dashboard'
-          : '/customer/dashboard'
+        consumePostAuthRedirect(user.role)
       );
 
     } catch (err: unknown) {

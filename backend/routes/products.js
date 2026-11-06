@@ -4,12 +4,21 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../db.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { normalizeSupplierReference } from '../lib/stockAudit.js';
+import { productAuditSnapshot, recordAuditLog } from '../lib/auditService.js';
 
 const router = express.Router();
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+const RECEIPTS_DIR = path.join(UPLOADS_DIR, 'receipts');
 
-if (process.env.NODE_ENV !== 'production' && !fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (process.env.NODE_ENV !== 'production') {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(RECEIPTS_DIR)) {
+    fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+  }
 }
 
 function processBase64Image(imageValue) {
@@ -25,6 +34,39 @@ function processBase64Image(imageValue) {
   const fileName = `prod_${Date.now()}_${randomInt(100, 1000)}.${extension}`;
   fs.writeFileSync(path.join(UPLOADS_DIR, fileName), Buffer.from(match[2], 'base64'));
   return `/api/uploads/${fileName}`;
+}
+
+function processOpeningReceipt(receiptImage) {
+  if (!receiptImage) return null;
+
+  const value = String(receiptImage);
+  const match = value.match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
+
+  if (!match) {
+    throw Object.assign(
+      new Error('Opening supplier receipt must be a JPG, PNG, or WEBP image.'),
+      { statusCode: 400 }
+    );
+  }
+
+  const buffer = Buffer.from(match[2], 'base64');
+
+  if (buffer.length > 5 * 1024 * 1024) {
+    throw Object.assign(
+      new Error('Opening supplier receipt must not exceed 5 MB.'),
+      { statusCode: 400 }
+    );
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    return value;
+  }
+
+  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+  const fileName = `opening_receipt_${Date.now()}_${randomInt(1000, 10000)}.${extension}`;
+
+  fs.writeFileSync(path.join(RECEIPTS_DIR, fileName), buffer);
+  return `/api/uploads/receipts/${fileName}`;
 }
 
 function normalizeProductInput(body) {
@@ -53,6 +95,10 @@ function normalizeProductInput(body) {
 
   const deliveryClass = String(
     body.delivery_class || 'standard'
+  ).toLowerCase();
+
+  const fulfillmentRule = String(
+    body.fulfillment_rule || 'all'
   ).toLowerCase();
 
   const allowedDeliveryClasses = [
@@ -135,6 +181,15 @@ function normalizeProductInput(body) {
     );
   }
 
+  if (!['all', 'delivery_only'].includes(fulfillmentRule)) {
+    throw Object.assign(
+      new Error(
+        'Fulfillment availability must be All methods or Delivery only.'
+      ),
+      { statusCode: 400 }
+    );
+  }
+
   let bulkQuantityThreshold = null;
 
   const hasThreshold =
@@ -182,6 +237,7 @@ function normalizeProductInput(body) {
     status,
     deliveryClass,
     bulkQuantityThreshold,
+    fulfillmentRule,
     image: processBase64Image(
       body.image || '📦'
     ),
@@ -266,6 +322,13 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
+    const openingSupplierReference = product.stock > 0
+      ? normalizeSupplierReference(req.body.opening_supplier_reference)
+      : null;
+    const openingReceiptPath = product.stock > 0
+      ? processOpeningReceipt(req.body.opening_receipt_image)
+      : null;
+
     await connection.beginTransaction();
 
     if (product.barcode) {
@@ -297,8 +360,9 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
     brand,
     status,
     delivery_class,
-    bulk_quantity_threshold
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    bulk_quantity_threshold,
+    fulfillment_rule
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   [
     product.barcode,
     product.name,
@@ -315,19 +379,49 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
     product.status,
     product.deliveryClass,
     product.bulkQuantityThreshold,
+    product.fulfillmentRule,
   ]
 );
 
     if (product.stock > 0) {
       await connection.query(
         `INSERT INTO inventory_movements (
-          product_id, admin_id, supplier_id, sale_id, movement_type,
-          quantity, supplier_price, selling_price, movement_date, remarks
-        ) VALUES (?, ?, ?, NULL, 'Stock-In', ?, ?, ?, NOW(), 'Opening Inventory')`,
-        [result.insertId, req.user.id, related.supplierId, product.stock,
-          Number(openingCost.toFixed(2)), product.price]
+          product_id, admin_id, supplier_id, sale_id, movement_type, movement_reason,
+          quantity, supplier_price, selling_price, movement_date, remarks,
+          receipt_path, supplier_reference
+        ) VALUES (?, ?, ?, NULL, 'Stock-In', 'Opening Inventory', ?, ?, ?, NOW(), 'Opening Inventory', ?, ?)`,
+        [
+          result.insertId,
+          req.user.id,
+          related.supplierId,
+          product.stock,
+          Number(openingCost.toFixed(2)),
+          product.price,
+          openingReceiptPath,
+          openingSupplierReference,
+        ]
       );
     }
+
+    await recordAuditLog(connection, {
+      adminId: req.user.id,
+      action: 'product.create',
+      entityType: 'product',
+      entityId: result.insertId,
+      summary: `Created product ${product.name}.`,
+      after: productAuditSnapshot({
+        id: result.insertId,
+        ...product,
+        reorder_level: product.reorderLevel,
+        category: related.category.category_name,
+        category_id: related.category.category_id,
+        supplier_id: related.supplierId,
+        delivery_class: product.deliveryClass,
+        bulk_quantity_threshold: product.bulkQuantityThreshold,
+        fulfillment_rule: product.fulfillmentRule,
+      }),
+      reason: product.stock > 0 ? 'Product created with opening inventory.' : 'Product created.',
+    });
 
     await connection.commit();
     res.status(201).json({
@@ -357,6 +451,26 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     const product = normalizeProductInput(req.body);
     await connection.beginTransaction();
 
+    const [currentRows] = await connection.query(
+      `SELECT id, barcode, name, unit, price, category, category_id, supplier_id,
+              stock, reorder_level, brand, status, delivery_class,
+              bulk_quantity_threshold, fulfillment_rule
+       FROM products
+       WHERE id = ? FOR UPDATE`,
+      [req.params.id]
+    );
+    if (currentRows.length === 0) {
+      throw Object.assign(new Error('Product not found.'), { statusCode: 404 });
+    }
+
+    const currentStock = Number(currentRows[0].stock);
+    if (product.stock !== currentStock) {
+      throw Object.assign(
+        new Error('Stock cannot be changed from Edit Product. Refresh the product and use Inventory Adjustment / Physical Count instead.'),
+        { statusCode: 409 }
+      );
+    }
+
     if (product.barcode) {
       const [existing] = await connection.query(
         'SELECT id FROM products WHERE barcode = ? AND id <> ? LIMIT 1 FOR UPDATE',
@@ -381,12 +495,12 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     category_id = ?,
     supplier_id = ?,
     image = ?,
-    stock = ?,
     reorder_level = ?,
     brand = ?,
     status = ?,
     delivery_class = ?,
-    bulk_quantity_threshold = ?
+    bulk_quantity_threshold = ?,
+    fulfillment_rule = ?
    WHERE id = ?`,
   [
     product.barcode,
@@ -398,12 +512,12 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     related.category.category_id,
     related.supplierId,
     product.image,
-    product.stock,
     product.reorderLevel,
     product.brand,
     product.status,
     product.deliveryClass,
     product.bulkQuantityThreshold,
+    product.fulfillmentRule,
     req.params.id,
   ]
 );
@@ -411,6 +525,34 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     if (result.affectedRows === 0) {
       throw Object.assign(new Error('Product not found.'), { statusCode: 404 });
     }
+
+    const beforeProduct = productAuditSnapshot(currentRows[0]);
+    const afterProduct = productAuditSnapshot({
+      id: Number(req.params.id),
+      ...product,
+      stock: currentStock,
+      reorder_level: product.reorderLevel,
+      category: related.category.category_name,
+      category_id: related.category.category_id,
+      supplier_id: related.supplierId,
+      delivery_class: product.deliveryClass,
+      bulk_quantity_threshold: product.bulkQuantityThreshold,
+      fulfillment_rule: product.fulfillmentRule,
+    });
+
+    const priceChanged = Number(beforeProduct?.price || 0) !== Number(afterProduct?.price || 0);
+    await recordAuditLog(connection, {
+      adminId: req.user.id,
+      action: priceChanged ? 'product.price_update' : 'product.update',
+      entityType: 'product',
+      entityId: req.params.id,
+      summary: priceChanged
+        ? `Updated ${product.name} selling price from ₱${Number(beforeProduct.price).toFixed(2)} to ₱${Number(afterProduct.price).toFixed(2)}.`
+        : `Updated product ${product.name}.`,
+      before: beforeProduct,
+      after: afterProduct,
+      reason: priceChanged ? 'Admin product price/details update.' : 'Admin product details update.',
+    });
 
     await connection.commit();
     res.json({ message: 'Product updated successfully.' });
@@ -428,20 +570,79 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
+// Activate or deactivate a product without removing historical references.
+router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
   try {
-    const [result] = await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Product not found.' });
-    res.json({ message: 'Product deleted successfully.' });
-  } catch (error) {
-    console.error('Error deleting product:', error);
-    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      return res.status(409).json({
-        error: 'This product has transaction history and cannot be deleted. Mark it inactive instead.',
+    const productId = Number(req.params.id);
+    const status = String(req.body.status || '').toLowerCase();
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({
+        error: 'Invalid product ID.',
       });
     }
-    res.status(500).json({ error: 'Failed to delete product.' });
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({
+        error: 'Product status must be active or inactive.',
+      });
+    }
+
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      'SELECT id, name, status FROM products WHERE id = ? FOR UPDATE',
+      [productId]
+    );
+
+    if (rows.length === 0) {
+      throw Object.assign(new Error('Product not found.'), { statusCode: 404 });
+    }
+
+    const previousStatus = String(rows[0].status);
+    if (previousStatus !== status) {
+      await connection.query(
+        'UPDATE products SET status = ? WHERE id = ?',
+        [status, productId]
+      );
+
+      await recordAuditLog(connection, {
+        adminId: req.user.id,
+        action: 'product.status_change',
+        entityType: 'product',
+        entityId: productId,
+        summary: `${status === 'active' ? 'Activated' : 'Deactivated'} product ${rows[0].name}.`,
+        before: { status: previousStatus },
+        after: { status },
+        reason: 'Admin changed product availability status.',
+      });
+    }
+
+    await connection.commit();
+    res.json({
+      message:
+        status === 'active'
+          ? 'Product activated successfully.'
+          : 'Product deactivated successfully.',
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error updating product status:', error);
+    res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : 'Failed to update product status.',
+    });
+  } finally {
+    connection.release();
   }
+});
+
+// Permanent deletion is intentionally disabled so order, sales, and inventory
+// history cannot be accidentally orphaned or destroyed.
+router.delete('/:id', authenticateToken, requireAdmin, (_req, res) => {
+  return res.status(405).json({
+    error:
+      'Permanent product deletion is disabled. Deactivate the product instead.',
+  });
 });
 
 export default router;

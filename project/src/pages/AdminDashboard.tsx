@@ -4,11 +4,21 @@ import React, {
   useRef
 } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { AdminMessages } from '../components/AdminMessages';
+import { AdminDashboardOverview } from '../components/AdminDashboardOverview';
+import { AdminSidebar, type AdminSidebarTab } from '../components/AdminSidebar';
+import { InventoryAdjustmentPanel } from '../components/InventoryAdjustmentPanel';
+import { AdminAuditLogPanel } from '../components/AdminAuditLogPanel';
+import { SalesAdjustmentPanel } from '../components/SalesAdjustmentPanel';
+import { PurchaseOrdersPanel, type PurchaseOrderReceiveTarget } from '../components/PurchaseOrdersPanel';
+import { ReorderSuggestionsPanel } from '../components/ReorderSuggestionsPanel';
+import { CashierShiftPanel, CashierShiftStatusBanner } from '../components/CashierShiftPanel';
+import { ExpenseManagementPanel } from '../components/ExpenseManagementPanel';
 
 import { 
-  LayoutDashboard, ClipboardList, Package, ScanBarcode, ArrowLeftRight,
-  TrendingUp, AlertTriangle, CheckCircle, Clock, ShoppingCart, 
-  Search, Shield, MapPin, Save, RefreshCw, UsersRound, Mail,
+  ClipboardList, ScanBarcode, ArrowLeftRight,
+  AlertTriangle, CheckCircle, ShoppingCart, 
+  Search, MapPin, Save, RefreshCw, UsersRound, Mail,
   Phone, CalendarDays, Eye, UserCheck, UserX, Menu, X,
   FileBarChart, Printer, Download, ArrowUp, Wrench
 } from 'lucide-react';
@@ -17,17 +27,26 @@ type AdminTab =
   | 'overview'
   | 'customers'
   | 'orders'
+  | 'messages'
   | 'deliveryRates'
   | 'products'
+  | 'purchaseOrders'
+  | 'reorderSuggestions'
   | 'receiveStock'
+  | 'inventoryAdjustment'
   | 'categories'
   | 'suppliers'
+  | 'cashierShift'
+  | 'expenses'
   | 'pos'
   | 'sales'
+  | 'saleAdjustments'
   | 'movementHistory'
-  | 'reports';
+  | 'reports'
+  | 'auditLogs';
 
 type ReportType =
+  | 'management'
   | 'sales'
   | 'inventory'
   | 'lowStock'
@@ -37,15 +56,23 @@ const adminTabs: AdminTab[] = [
   'overview',
   'customers',
   'orders',
+  'messages',
   'deliveryRates',
   'products',
+  'purchaseOrders',
+  'reorderSuggestions',
   'receiveStock',
+  'inventoryAdjustment',
   'categories',
   'suppliers',
+  'cashierShift',
+  'expenses',
   'pos',
   'sales',
+  'saleAdjustments',
   'movementHistory',
   'reports',
+  'auditLogs',
 ];
 
 const escapeCsvValue = (value: unknown) =>
@@ -78,11 +105,17 @@ type DeliveryZone =
 
 interface DeliveryRateSetting {
   id: number;
+  municipality: string;
   barangay: string;
   zone: DeliveryZone;
   surcharge: number;
   is_active: boolean;
   updated_at?: string;
+}
+
+interface DeliveryAreasResponse {
+  municipalities: string[];
+  barangays: Record<string, string[]>;
 }
 
 interface AdminUser {
@@ -113,6 +146,8 @@ interface CustomerAccount {
 interface CustomerOrderSummary {
   id: string;
   total: number;
+  original_subtotal?: number | string | null;
+  discount_amount?: number | string | null;
   fulfillment: 'pickup' | 'delivery' | 'shop_go';
   payment_method: string;
   status: Order['status'];
@@ -136,6 +171,7 @@ interface Product {
   status?: 'active' | 'inactive';
   delivery_class?: DeliveryLoadClass;
   bulk_quantity_threshold?: number | null;
+  fulfillment_rule?: 'all' | 'delivery_only';
 }
 interface Category {
   category_id: number;
@@ -150,6 +186,7 @@ interface Supplier {
   contact_person: string | null;
   contact_number: string | null;
   address: string | null;
+  lead_time_days: number | null;
   status: 'Active' | 'Inactive';
 }
 
@@ -170,6 +207,8 @@ interface InventoryMovement {
   order_id: string | null;
 
   movement_type: 'Stock-In' | 'Stock-Out';
+  movement_reason?: string | null;
+  sale_adjustment_item_id?: number | null;
   quantity: number;
 
   supplier_price: number;
@@ -178,6 +217,7 @@ interface InventoryMovement {
   movement_date: string;
   remarks: string | null;
   receipt_path?: string | null;
+  supplier_reference?: string | null;
   source_label?: string | null;
   reference_label?: string | null;
 }
@@ -187,29 +227,123 @@ interface SalesHistoryItem {
   order_id: string | null;
   admin_id: number;
   sales_source: 'Online Order' | 'Onsite POS';
+  // Backward-compatible total-revenue alias from the API.
   revenue: number;
+  gross_merchandise_sales: number;
+  discount_amount: number;
+  merchandise_refunds: number;
+  net_merchandise_sales: number;
+  service_fee_refunds: number;
+  service_revenue: number;
+  delivery_fee_refunds: number;
+  delivery_revenue: number;
+  fee_revenue: number;
+  total_refunds: number;
+  original_total_revenue: number;
+  total_revenue: number;
   payment_status: 'Paid' | 'Cancelled';
   sale_date: string;
   item_count: number;
-total_quantity: number;
-items_summary: string;
+  total_quantity: number;
+  net_quantity: number;
+  returned_quantity: number;
+  items_summary: string;
+  original_cogs: number;
+  cogs_reversed: number;
   cogs: number;
   gross_profit: number;
+  gross_profit_margin: number;
   reference: string;
   source_label: 'Pickup' | 'Shop & Go' | 'Delivery' | 'POS';
   payment_method: string;
+  adjustment_count: number;
+  void_count: number;
+  adjustment_state: 'Completed' | 'Adjusted' | 'Voided';
 }
 
 interface SalesSummary {
   total_sales: number;
+  total_gross_merchandise_sales: number;
+  total_discounts: number;
+  total_merchandise_refunds: number;
+  total_net_merchandise_sales: number;
+  total_service_fee_refunds: number;
+  total_delivery_fee_refunds: number;
+  total_service_revenue: number;
+  total_delivery_revenue: number;
+  total_fee_revenue: number;
+  total_refunds: number;
   total_revenue: number;
+  total_original_cogs: number;
+  total_cogs_reversed: number;
   total_cogs: number;
   total_gross_profit: number;
+  total_gross_profit_margin: number;
+  total_items_sold: number;
+  total_items_returned: number;
+  total_adjustments: number;
+  total_voided_sales: number;
+}
+
+interface ManagementOverviewReport {
+  profitability: {
+    today: {
+      grossProfit: number;
+      serviceDeliveryRevenue: number;
+      operatingExpenses: number;
+      estimatedNetProfit: number;
+      expenseCount: number;
+    };
+    month: {
+      from: string;
+      to: string;
+      grossProfit: number;
+      serviceDeliveryRevenue: number;
+      operatingExpenses: number;
+      estimatedNetProfit: number;
+      expenseCount: number;
+    };
+  };
+  purchasing: {
+    openPurchaseOrders: number;
+    partiallyReceivedOrders: number;
+    outstandingUnits: number;
+    outstandingExpectedCost: number;
+  };
+  replenishment: {
+    needsReorder: number;
+    coveredByOpenPo: number;
+    setupRequired: number;
+    healthy: number;
+    suggestedUnits: number;
+  };
+  saleAdjustmentsToday: {
+    adjustmentCount: number;
+    returnCount: number;
+    voidCount: number;
+    refundAmount: number;
+    merchandiseRefundAmount: number;
+  };
+  cashier: {
+    hasOpenShift: boolean;
+    currentShift: null | {
+      shiftId: number;
+      expectedCash: number;
+      transactionCount: number;
+    };
+    lastClosedShift: null | {
+      shiftId: number;
+      discrepancy: number;
+      closedAt: string;
+    };
+  };
 }
 
 interface CartItem {
   product: Product;
   quantity: number;
+  order_item_price?: number | string | null;
+  order_item_subtotal?: number | string | null;
 }
 
 interface PosDeliveryReceipt {
@@ -230,6 +364,7 @@ interface PosDeliveryReceipt {
   customerName: string;
   contactPerson: string;
   contactNumber: string;
+  municipality: string;
   barangay: string;
   address: string;
   landmark: string;
@@ -242,8 +377,11 @@ interface PosDeliveryReceipt {
 interface Order {
   id: string;
   date: string;
+  created_at?: string | null;
   items: CartItem[];
   total: number;
+  original_subtotal?: number | string | null;
+  discount_amount?: number | string | null;
 
   fulfillment:
     | 'pickup'
@@ -256,6 +394,7 @@ interface Order {
     | 'cash';
 
   payment_method?: string;
+  payment_status?: 'Pending' | 'Paid' | 'Failed' | 'Cancelled' | string | null;
 
   customer_first_name?: string | null;
   customer_last_name?: string | null;
@@ -269,13 +408,21 @@ interface Order {
   scheduled_pickup_time?: string | null;
 
   admin_message?: string | null;
+  message_history?: Array<{
+  id: number;
+  message: string;
+  created_at: string;
+}>;
 
   delivery_contact_person?: string | null;
   delivery_contact_number?: string | null;
+  delivery_municipality?: string | null;
   delivery_barangay?: string | null;
   delivery_address?: string | null;
   delivery_landmark?: string | null;
   delivery_instructions?: string | null;
+  delivery_latitude?: number | string | null;
+  delivery_longitude?: number | string | null;
   delivery_fee?: number | string | null;
   service_fee?: number | string | null;
   previous_status?: string | null;
@@ -304,6 +451,31 @@ const formatPaymentMethod = (method: string) => {
   if (method === 'card') return 'Card (PayMongo)';
   if (method === 'paymongo') return 'PayMongo';
   return 'Cash';
+};
+
+const PAID_ONLINE_ORDER_LOCK_MESSAGE =
+  'This order has a successfully verified PayMongo payment. Reject and Cancel actions are unavailable because refund processing is not supported by this system.';
+
+const isPaidOnlineOrder = (order: Order) => {
+  const paymentMethod = String(
+    order.payment_method ||
+    order.paymentMethod ||
+    'cash'
+  )
+    .trim()
+    .toLowerCase();
+
+  const paymentPaid =
+    String(order.payment_status || '')
+      .trim()
+      .toLowerCase() === 'paid';
+
+  return (
+    ['card', 'gcash', 'paymongo'].includes(
+      paymentMethod
+    ) &&
+    paymentPaid
+  );
 };
 
 let adminSessionRedirecting = false;
@@ -378,7 +550,18 @@ const [searchParams, setSearchParams] = useSearchParams();
 const requestedTab = searchParams.get('tab');
 const dashboardMainRef = useRef<HTMLElement>(null);
 const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() =>
+  localStorage.getItem('rayjin_admin_sidebar_collapsed') === '1'
+);
+const [salesTableView, setSalesTableView] = useState<'compact' | 'full'>('compact');
+const [movementTableView, setMovementTableView] = useState<'compact' | 'full'>('compact');
+const [reportTableView, setReportTableView] = useState<'compact' | 'full'>('compact');
+const [selectedSaleHistory, setSelectedSaleHistory] = useState<SalesHistoryItem | null>(null);
+const [selectedMovementHistory, setSelectedMovementHistory] = useState<InventoryMovement | null>(null);
+
+useEffect(() => {
+  localStorage.setItem('rayjin_admin_sidebar_collapsed', isSidebarCollapsed ? '1' : '0');
+}, [isSidebarCollapsed]);
 
 const activeTab: AdminTab =
   requestedTab && adminTabs.includes(requestedTab as AdminTab)
@@ -413,40 +596,19 @@ const setActiveTab = (tab: AdminTab) => {
   scrollAdminContentToTop('smooth');
 };
 
-const adminNavClass = (tab: AdminTab) =>
-  `group flex w-full items-center rounded-xl py-3 text-[13px] font-medium
-   transition-all duration-200 active:scale-[0.98]
-   ${
-     isSidebarCollapsed
-       ? 'gap-3 px-4 lg:justify-center lg:gap-0 lg:px-0'
-       : 'gap-3 px-4'
-   }
-   ${
-     activeTab === tab
-       ? 'bg-emerald-50 text-[#15803d] ring-1 ring-emerald-100 shadow-sm'
-       : 'text-[#476257] hover:bg-[#f2faf5] hover:text-[#15803d]'
-   }`;
-const adminNavLabelClass =
-  isSidebarCollapsed
-    ? 'lg:hidden'
-    : '';
-
-const adminSectionLabelClass =
-  `px-4 pb-1 text-[10px] font-bold uppercase tracking-[0.18em]
-   text-[#789086] ${
-     isSidebarCollapsed ? 'lg:hidden' : ''
-   }`;
    useEffect(() => {
   scrollAdminContentToTop('auto');
 }, [activeTab]);
 
 
-const [reportType, setReportType] = useState<ReportType>('sales');
+const [reportType, setReportType] = useState<ReportType>('management');
 const [reportSearch, setReportSearch] = useState('');
 const [reportDateFrom, setReportDateFrom] = useState('');
 const [reportDateTo, setReportDateTo] = useState('');
 const [reportCategory, setReportCategory] = useState('all');
 const [reportGeneratedAt, setReportGeneratedAt] = useState(new Date());
+const [managementOverviewReport, setManagementOverviewReport] = useState<ManagementOverviewReport | null>(null);
+const [managementOverviewError, setManagementOverviewError] = useState('');
 
 const [reportMovementType, setReportMovementType] = useState<
   'all' | 'Stock-In' | 'Stock-Out'
@@ -489,9 +651,26 @@ const [user, setUser] = useState<AdminUser>({
 const [salesSummary, setSalesSummary] =
   useState<SalesSummary>({
     total_sales: 0,
+    total_gross_merchandise_sales: 0,
+    total_discounts: 0,
+    total_merchandise_refunds: 0,
+    total_net_merchandise_sales: 0,
+    total_service_fee_refunds: 0,
+    total_delivery_fee_refunds: 0,
+    total_service_revenue: 0,
+    total_delivery_revenue: 0,
+    total_fee_revenue: 0,
+    total_refunds: 0,
     total_revenue: 0,
+    total_original_cogs: 0,
+    total_cogs_reversed: 0,
     total_cogs: 0,
     total_gross_profit: 0,
+    total_gross_profit_margin: 0,
+    total_items_sold: 0,
+    total_items_returned: 0,
+    total_adjustments: 0,
+    total_voided_sales: 0,
   });
 
   const [salesDatePreset, setSalesDatePreset] = useState<
@@ -511,7 +690,8 @@ const [salesSearch, setSalesSearch] = useState('');
   supplier_name: '',
   contact_person: '',
   contact_number: '',
-  address: ''
+  address: '',
+  lead_time_days: ''
 });
 const [editSupplierStatus, setEditSupplierStatus] = useState<
   'idle' | 'success' | 'error'
@@ -522,7 +702,8 @@ const [editSupplierError, setEditSupplierError] = useState('');
   supplier_name: '',
   contact_person: '',
   contact_number: '',
-  address: ''
+  address: '',
+  lead_time_days: ''
 });
 const [supplierStatus, setSupplierStatus] = useState<
   'idle' | 'success' | 'error'
@@ -563,9 +744,52 @@ const [
   setCategoryStatusFilter
 ] = useState<'all' | 'active' | 'inactive'>('all');
 
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [deliveryRateSettings, setDeliveryRateSettings] =
-    useState<DeliveryRateSetting[]>([]);
+const [orders, setOrders] = useState<Order[]>([]);
+const [adminMessageDrafts, setAdminMessageDrafts] =
+  useState<Record<string, string>>({});
+const [expandedAdminOrderUpdates, setExpandedAdminOrderUpdates] =
+  useState<Record<string, boolean>>({});
+const [recentlyUpdatedOrderId, setRecentlyUpdatedOrderId] =
+  useState<string | null>(null);
+const orderCardRefs =
+  useRef<Record<string, HTMLDivElement | null>>({});
+
+const [pickupDeadlineNow, setPickupDeadlineNow] =
+  useState(() => Date.now());
+
+useEffect(() => {
+  const timer = window.setInterval(() => {
+    setPickupDeadlineNow(Date.now());
+  }, 60 * 1000);
+
+  return () => {
+    window.clearInterval(timer);
+  };
+}, []);
+
+// Fulfillment Center filters.
+// These only filter the already-loaded Admin order list.
+// They do not modify order records or backend data.
+const [orderSearch, setOrderSearch] = useState('');
+const [orderDateFilter, setOrderDateFilter] = useState('');
+const [orderStatusFilter, setOrderStatusFilter] =
+  useState<'all' | Order['status']>('all');
+
+const [deliveryRateSettings, setDeliveryRateSettings] =
+  useState<DeliveryRateSetting[]>([]);
+const [deliveryAreas, setDeliveryAreas] = useState<DeliveryAreasResponse>({
+  municipalities: ['Initao', 'Libertad', 'Naawan', 'Gitagum'],
+  barangays: {},
+});
+const [newDeliveryRate, setNewDeliveryRate] = useState({
+  municipality: '',
+  barangay: '',
+  zone: '' as '' | DeliveryZone,
+  surcharge: '',
+  is_active: false,
+});
+const [addingDeliveryRate, setAddingDeliveryRate] = useState(false);
+
   const [deliveryRatesLoading, setDeliveryRatesLoading] =
     useState(false);
   const [savingDeliveryRateId, setSavingDeliveryRateId] =
@@ -579,10 +803,23 @@ const [
   
   const [posSearch, setPosSearch] = useState('');
   const [posFulfillment, setPosFulfillment] = useState<'pickup' | 'delivery'>('pickup');
+
+  const posCartRequiresDelivery = posCart.some((item) => {
+    const liveProduct = products.find((product) => product.id === item.product.id);
+    return (liveProduct?.fulfillment_rule || item.product.fulfillment_rule || 'all') === 'delivery_only';
+  });
+
+  useEffect(() => {
+    if (posCartRequiresDelivery && posFulfillment !== 'delivery') {
+      setPosFulfillment('delivery');
+    }
+  }, [posCartRequiresDelivery, posFulfillment]);
+
   const [posDeliveryDetails, setPosDeliveryDetails] = useState({
     customer_name: '',
     contact_person: '',
     contact_number: '',
+    municipality: '',
     barangay: '',
     address: '',
     landmark: '',
@@ -640,8 +877,9 @@ useEffect(() => {
       return;
     }
 
-    // Normal compact Product Selection height.
-    const minimumHeight = 500;
+    // Use more of the available desktop viewport so manual product
+    // selection can display more products without changing POS logic.
+    const minimumHeight = Math.max(580, window.innerHeight - 190);
 
     // Let the cart/checkout determine the height when it becomes taller.
     const cartHeight = cartPanel.getBoundingClientRect().height;
@@ -679,7 +917,10 @@ const [newProduct, setNewProduct] = useState({
   status: 'active' as 'active' | 'inactive',
   delivery_class: 'standard' as DeliveryLoadClass,
   bulk_quantity_threshold: '',
-  opening_supplier_price: ''
+  fulfillment_rule: 'all' as 'all' | 'delivery_only',
+  opening_supplier_price: '',
+  opening_supplier_reference: '',
+  opening_receipt_image: ''
 });
 
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -701,6 +942,9 @@ const [movementSearch, setMovementSearch] =
 
 const [movementTypeFilter, setMovementTypeFilter] =
   useState<'all' | 'Stock-In' | 'Stock-Out'>('all');
+
+const [movementSourceFilter, setMovementSourceFilter] =
+  useState('all');
 
 const [movementCategoryFilter, setMovementCategoryFilter] =
   useState('all');
@@ -726,16 +970,19 @@ const [stockReceiving, setStockReceiving] = useState({
   supplier_id: '',
   quantity: '',
   supplier_price: '',
+  supplier_reference: '',
   selling_price: '',
-  receipt_image: ''
+  receipt_image: '',
+  purchase_order_item_id: '',
+  purchase_order_id: '',
+  purchase_order_number: '',
+  purchase_order_remaining_quantity: ''
 });
 
 const [stockReceivingProductQuery, setStockReceivingProductQuery] = useState('');
 const [stockReceivingSupplierQuery, setStockReceivingSupplierQuery] = useState('');
-const [stockReceivingSearch, setStockReceivingSearch] = useState('');
-const [stockReceivingDateFrom, setStockReceivingDateFrom] = useState('');
-const [stockReceivingDateTo, setStockReceivingDateTo] = useState('');
 const [stockReceivingRequestId, setStockReceivingRequestId] = useState(() => crypto.randomUUID());
+const [stockReceivingReceiptInputKey, setStockReceivingReceiptInputKey] = useState(0);
 
 const [stockReceivingStatus, setStockReceivingStatus] = useState<
   'idle' | 'loading' | 'success' | 'error'
@@ -1023,6 +1270,38 @@ const fetchInventoryMovements = async () => {
   }
 };
 
+const fetchManagementOverviewReport = async () => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    handleAdminSessionExpired();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/analytics/admin', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      handleAdminSessionExpired();
+      return;
+    }
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setManagementOverviewError(data.error || 'Unable to load the management summary.');
+      return;
+    }
+
+    const data = await res.json();
+    setManagementOverviewReport(data.managementOverview || null);
+    setManagementOverviewError('');
+  } catch (error) {
+    console.error('Error fetching management summary:', error);
+    setManagementOverviewError('Unable to connect to the management-summary service.');
+  }
+};
+
 const fetchSalesHistory = async () => {
   const token = localStorage.getItem('token');
 
@@ -1061,9 +1340,26 @@ const fetchSalesHistory = async () => {
     setSalesSummary(
       data.summary || {
         total_sales: 0,
+        total_gross_merchandise_sales: 0,
+        total_discounts: 0,
+        total_merchandise_refunds: 0,
+        total_net_merchandise_sales: 0,
+        total_service_fee_refunds: 0,
+        total_delivery_fee_refunds: 0,
+        total_service_revenue: 0,
+        total_delivery_revenue: 0,
+        total_fee_revenue: 0,
+        total_refunds: 0,
         total_revenue: 0,
+        total_original_cogs: 0,
+        total_cogs_reversed: 0,
         total_cogs: 0,
         total_gross_profit: 0,
+        total_gross_profit_margin: 0,
+        total_items_sold: 0,
+        total_items_returned: 0,
+        total_adjustments: 0,
+        total_voided_sales: 0,
       }
     );
 
@@ -1097,12 +1393,6 @@ const handleStockReceiving = async (e: React.FormEvent) => {
     return;
   }
 
-  if (!stockReceiving.receipt_image) {
-    setStockReceivingStatus('error');
-    setStockReceivingMessage('Please attach a receipt image.');
-    return;
-  }
-
   const quantity = Number(stockReceiving.quantity);
   const supplierPrice = Number(stockReceiving.supplier_price);
 
@@ -1115,6 +1405,18 @@ const handleStockReceiving = async (e: React.FormEvent) => {
   }
 
   if (
+    stockReceiving.purchase_order_item_id &&
+    Number(stockReceiving.purchase_order_remaining_quantity || 0) > 0 &&
+    quantity > Number(stockReceiving.purchase_order_remaining_quantity)
+  ) {
+    setStockReceivingStatus('error');
+    setStockReceivingMessage(
+      `Received quantity cannot exceed the ${stockReceiving.purchase_order_remaining_quantity} unit(s) remaining on ${stockReceiving.purchase_order_number}.`
+    );
+    return;
+  }
+
+  if (
     !stockReceiving.supplier_price ||
     supplierPrice <= 0
   ) {
@@ -1122,6 +1424,13 @@ const handleStockReceiving = async (e: React.FormEvent) => {
     setStockReceivingMessage(
       'Supplier cost must be greater than zero.'
     );
+    return;
+  }
+
+  const supplierReference = stockReceiving.supplier_reference.trim();
+  if (supplierReference.length > 120) {
+    setStockReceivingStatus('error');
+    setStockReceivingMessage('Supplier reference number must not exceed 120 characters.');
     return;
   }
 
@@ -1160,11 +1469,15 @@ const handleStockReceiving = async (e: React.FormEvent) => {
         ),
         quantity,
         supplier_price: supplierPrice,
+        supplier_reference: supplierReference || null,
         ...(sellingPrice !== undefined && {
           selling_price: sellingPrice,
         }),
-        receipt_image: stockReceiving.receipt_image,
+        receipt_image: stockReceiving.receipt_image || null,
         receivingRequestId: stockReceivingRequestId,
+        ...(stockReceiving.purchase_order_item_id && {
+          purchase_order_item_id: Number(stockReceiving.purchase_order_item_id),
+        }),
       }),
     });
 
@@ -1195,13 +1508,19 @@ const handleStockReceiving = async (e: React.FormEvent) => {
       supplier_id: '',
       quantity: '',
       supplier_price: '',
+      supplier_reference: '',
       selling_price: '',
       receipt_image: '',
+      purchase_order_item_id: '',
+      purchase_order_id: '',
+      purchase_order_number: '',
+      purchase_order_remaining_quantity: '',
     });
 
     setStockReceivingProductQuery('');
     setStockReceivingSupplierQuery('');
     setStockReceivingRequestId(crypto.randomUUID());
+    setStockReceivingReceiptInputKey((current) => current + 1);
 
     await Promise.all([fetchProducts(), fetchInventoryMovements()]);
 
@@ -1218,19 +1537,46 @@ const handleStockReceiving = async (e: React.FormEvent) => {
   }
 };
 
+const handlePurchaseOrderReceiveItem = (target: PurchaseOrderReceiveTarget) => {
+  setStockReceiving({
+    product_id: String(target.product_id),
+    supplier_id: String(target.supplier_id),
+    quantity: String(target.remaining_quantity),
+    supplier_price: Number(target.expected_unit_cost).toFixed(2),
+    supplier_reference: '',
+    selling_price: Number(target.current_selling_price).toFixed(2),
+    receipt_image: '',
+    purchase_order_item_id: String(target.purchase_order_item_id),
+    purchase_order_id: String(target.purchase_order_id),
+    purchase_order_number: target.po_number,
+    purchase_order_remaining_quantity: String(target.remaining_quantity),
+  });
+  setStockReceivingProductQuery(target.product_name);
+  setStockReceivingSupplierQuery(target.supplier_name);
+  setStockReceivingRequestId(crypto.randomUUID());
+  setStockReceivingReceiptInputKey((current) => current + 1);
+  setStockReceivingStatus('idle');
+  setStockReceivingMessage('');
+  setActiveTab('receiveStock');
+};
+
 const handleReceiptChange = (event: React.ChangeEvent<HTMLInputElement>) => {
   const file = event.target.files?.[0];
   if (!file) return;
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    setStockReceiving((current) => ({ ...current, receipt_image: '' }));
     setStockReceivingStatus('error');
     setStockReceivingMessage('Receipt must be a JPG, PNG, or WEBP image.');
     event.target.value = '';
+    setStockReceivingReceiptInputKey((current) => current + 1);
     return;
   }
   if (file.size > 5 * 1024 * 1024) {
+    setStockReceiving((current) => ({ ...current, receipt_image: '' }));
     setStockReceivingStatus('error');
     setStockReceivingMessage('Receipt image must not exceed 5 MB.');
     event.target.value = '';
+    setStockReceivingReceiptInputKey((current) => current + 1);
     return;
   }
   const reader = new FileReader();
@@ -1345,7 +1691,10 @@ const handleStartEditSupplier = (supplier: Supplier) => {
     supplier_name: supplier.supplier_name,
     contact_person: supplier.contact_person || '',
     contact_number: supplier.contact_number || '',
-    address: supplier.address || ''
+    address: supplier.address || '',
+    lead_time_days: supplier.lead_time_days === null || supplier.lead_time_days === undefined
+      ? ''
+      : String(supplier.lead_time_days)
   });
 };
 
@@ -1383,6 +1732,9 @@ const handleUpdateSupplier = async (e: React.FormEvent) => {
           contact_person: editSupplierData.contact_person,
           contact_number: editSupplierData.contact_number,
           address: editSupplierData.address,
+          lead_time_days: editSupplierData.lead_time_days === ''
+            ? null
+            : Number(editSupplierData.lead_time_days),
         }),
       }
     );
@@ -1518,6 +1870,9 @@ const handleAddSupplier = async (e: React.FormEvent) => {
         contact_person: newSupplier.contact_person,
         contact_number: newSupplier.contact_number,
         address: newSupplier.address,
+        lead_time_days: newSupplier.lead_time_days === ''
+          ? null
+          : Number(newSupplier.lead_time_days),
       }),
     });
 
@@ -1541,6 +1896,7 @@ const handleAddSupplier = async (e: React.FormEvent) => {
       contact_person: '',
       contact_number: '',
       address: '',
+      lead_time_days: '',
     });
 
     setSupplierError('');
@@ -1824,6 +2180,59 @@ const fetchOrders = async () => {
   }
 };
 
+const focusUpdatedOrder = (
+  orderId: string
+) => {
+  setRecentlyUpdatedOrderId(
+    orderId
+  );
+
+  window.setTimeout(() => {
+    orderCardRefs.current[
+      orderId
+    ]?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, 150);
+
+  window.setTimeout(() => {
+    setRecentlyUpdatedOrderId(
+      (current) =>
+        current === orderId
+          ? null
+          : current
+    );
+  }, 2200);
+};
+
+const fetchDeliveryAreas = async () => {
+  const token = localStorage.getItem('token');
+
+  if (!token) {
+    handleAdminSessionExpired();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/orders/delivery-areas', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      handleAdminSessionExpired();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && Array.isArray(data.municipalities) && data.barangays) {
+      setDeliveryAreas(data);
+    }
+  } catch (err) {
+    console.error('Error fetching supported delivery areas:', err);
+  }
+};
+
 const fetchDeliveryRateSettings = async () => {
   const token = localStorage.getItem('token');
 
@@ -2018,6 +2427,7 @@ useEffect(() => {
 useEffect(() => {
   if (activeTab === 'reports') {
     Promise.all([
+      fetchManagementOverviewReport(),
       fetchSalesHistory(),
       fetchProducts(),
       fetchSuppliers(),
@@ -2028,6 +2438,7 @@ useEffect(() => {
 
 useEffect(() => {
   if (activeTab === 'deliveryRates' || activeTab === 'pos') {
+    fetchDeliveryAreas();
     fetchDeliveryRateSettings();
   }
 }, [activeTab]);
@@ -2074,6 +2485,20 @@ const handleAdvanceOrderStatus = async (
 
   if (
     order.status === 'pending' &&
+    order.fulfillment === 'shop_go' &&
+    !(
+      order.scheduled_pickup_date &&
+      order.scheduled_pickup_time
+    )
+  ) {
+    alert(
+      'Confirm the final Shop & Go pickup schedule before approving this order.'
+    );
+    return;
+  }
+
+  if (
+    order.status === 'pending' &&
     order.fulfillment === 'delivery' &&
     (
       order.delivery_fee === null ||
@@ -2105,10 +2530,23 @@ const handleAdvanceOrderStatus = async (
   if (order.status === 'pending') {
     nextStatus = 'approved';
 
-  } else if (order.status === 'approved') {
-    nextStatus = 'processing';
+} else if (order.status === 'approved') {
 
-  } else if (order.status === 'processing') {
+  if (order.fulfillment === 'pickup') {
+    const confirmed = window.confirm(
+      `Confirm that the customer is physically present and has presented Order ID ${order.id}.\n\n` +
+      'Continue only after the Order ID has been verified. ' +
+      'The order will now move to Processing and preparation may begin.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  nextStatus = 'processing';
+
+} else if (order.status === 'processing') {
     nextStatus = order.fulfillment === 'delivery'
       ? 'out_for_delivery'
       : 'ready';
@@ -2171,8 +2609,16 @@ const handleAdvanceOrderStatus = async (
         },
 
         body: JSON.stringify({
-          status: nextStatus,
-        }),
+  status: nextStatus,
+
+  ...(order.fulfillment === 'pickup' &&
+  order.status === 'approved' &&
+  nextStatus === 'processing'
+    ? {
+        pickupOrderIdVerified: true,
+      }
+    : {}),
+}),
       }
     );
 
@@ -2198,6 +2644,7 @@ const handleAdvanceOrderStatus = async (
     }
 
     await fetchOrders();
+    focusUpdatedOrder(orderId);
 
     if (nextStatus === 'completed') {
       await Promise.all([
@@ -2219,7 +2666,24 @@ const handleAdvanceOrderStatus = async (
   }
 };
 
+
+
 const handleRejectOrder = async (orderId: string) => {
+  const targetOrder =
+  orders.find(
+    (order) => order.id === orderId
+  );
+
+if (
+  targetOrder &&
+  isPaidOnlineOrder(targetOrder)
+) {
+  alert(
+    PAID_ONLINE_ORDER_LOCK_MESSAGE
+  );
+  return;
+}
+
   const token = localStorage.getItem('token');
 
   if (!token) {
@@ -2265,6 +2729,7 @@ const handleRejectOrder = async (orderId: string) => {
     }
 
     await fetchOrders();
+    focusUpdatedOrder(orderId);
 
   } catch (err) {
     console.error(
@@ -2283,6 +2748,25 @@ const handleSaveShopGoSchedule = async (
   e: React.FormEvent<HTMLFormElement>
 ) => {
   e.preventDefault();
+
+  const order =
+    orders.find(
+      (candidate) =>
+        candidate.id === orderId
+    );
+
+  if (!order) {
+    return;
+  }
+
+  if (order.status !== 'pending') {
+    alert(
+      order.status === 'awaiting_payment'
+        ? 'The final Shop & Go schedule can be confirmed only after successful payment verification.'
+        : 'The confirmed Shop & Go schedule is locked after the order leaves Pending status.'
+    );
+    return;
+  }
 
   const token =
     localStorage.getItem('token');
@@ -2303,11 +2787,6 @@ const handleSaveShopGoSchedule = async (
   const scheduledPickupTime =
     String(
       form.get('scheduledPickupTime') || ''
-    ).trim();
-
-  const adminMessage =
-    String(
-      form.get('adminMessage') || ''
     ).trim();
 
   if (
@@ -2334,11 +2813,10 @@ const handleSaveShopGoSchedule = async (
             `Bearer ${token}`,
         },
 
-        body: JSON.stringify({
-          scheduledPickupDate,
-          scheduledPickupTime,
-          adminMessage,
-        }),
+body: JSON.stringify({
+  scheduledPickupDate,
+  scheduledPickupTime,
+}),
       }
     );
 
@@ -2398,23 +2876,86 @@ const handleGenerateBarcode = async () => {
   }
 };
 
-const handleSaveAdminMessage = async (orderId: string, message: string) => {
+const handleSaveAdminMessage = async (
+  orderId: string,
+  message: string
+): Promise<boolean> => {
+  const cleanMessage = message.trim();
+
+  if (!cleanMessage) {
+    alert('Please enter a customer message before updating.');
+    return false;
+  }
+
   const token = localStorage.getItem('token');
-  if (!token) return handleAdminSessionExpired();
+
+  if (!token) {
+    handleAdminSessionExpired();
+    return false;
+  }
+
   try {
-    const response = await fetch(`/api/orders/${orderId}/admin-message`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ adminMessage: message }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401 || response.status === 403) return handleAdminSessionExpired();
-    if (!response.ok) return alert(data.error || 'Unable to update the message.');
-    alert(data.message || 'Message updated successfully.');
+    const response = await fetch(
+      `/api/orders/${orderId}/admin-message`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          adminMessage: cleanMessage,
+        }),
+      }
+    );
+
+    const data = await response
+      .json()
+      .catch(() => ({}));
+
+    if (
+      response.status === 401 ||
+      response.status === 403
+    ) {
+      handleAdminSessionExpired();
+      return false;
+    }
+
+    if (!response.ok) {
+      alert(
+        data.error ||
+          'Unable to update the message.'
+      );
+      return false;
+    }
+
     await fetchOrders();
+
+    // Clear only this order's composer after
+    // the message has been successfully saved.
+    setAdminMessageDrafts((current) => ({
+      ...current,
+      [orderId]: '',
+    }));
+
+    alert(
+      data.message ||
+        'Message updated successfully.'
+    );
+
+    return true;
+
   } catch (error) {
-    console.error('Admin message error:', error);
-    alert('Unable to connect to the order service.');
+    console.error(
+      'Admin message error:',
+      error
+    );
+
+    alert(
+      'Unable to connect to the order service.'
+    );
+
+    return false;
   }
 };
 
@@ -2422,6 +2963,20 @@ const handleOrderAction = async (
   order: Order,
   action: 'failed_delivery' | 'deactivate' | 'reactivate' | 'cancel' | 'cancel_permanently'
 ) => {
+
+  if (
+  (
+    action === 'cancel' ||
+    action === 'cancel_permanently'
+  ) &&
+  isPaidOnlineOrder(order)
+) {
+  alert(
+    PAID_ONLINE_ORDER_LOCK_MESSAGE
+  );
+  return;
+}
+
   const labels = {
     failed_delivery: 'mark this order as Failed Delivery',
     deactivate: 'temporarily deactivate this order',
@@ -2450,9 +3005,102 @@ const handleOrderAction = async (
     if (!response.ok) return alert(data.error || 'Unable to update the order.');
     alert(data.message || 'Order updated successfully.');
     await fetchOrders();
+    focusUpdatedOrder(order.id);
   } catch (error) {
     console.error('Order action error:', error);
     alert('Unable to connect to the order service.');
+  }
+};
+
+const handleAddDeliveryRate = async () => {
+  const surcharge = Number(newDeliveryRate.surcharge);
+
+  if (!newDeliveryRate.municipality || !newDeliveryRate.barangay) {
+    setDeliveryRatesMessage({
+      type: 'error',
+      text: 'Select a municipality and barangay.',
+    });
+    return;
+  }
+
+  if (!newDeliveryRate.zone) {
+    setDeliveryRatesMessage({
+      type: 'error',
+      text: 'Select a delivery zone.',
+    });
+    return;
+  }
+
+  if (
+    newDeliveryRate.surcharge.trim() === '' ||
+    !Number.isFinite(surcharge) ||
+    surcharge < 0 ||
+    surcharge > 5000
+  ) {
+    setDeliveryRatesMessage({
+      type: 'error',
+      text: 'Enter the client-approved surcharge from ₱0 to ₱5,000.',
+    });
+    return;
+  }
+
+  const token = localStorage.getItem('token');
+  if (!token) return handleAdminSessionExpired();
+
+  setAddingDeliveryRate(true);
+  setDeliveryRatesMessage(null);
+
+  try {
+    const res = await fetch('/api/orders/delivery-rates', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        municipality: newDeliveryRate.municipality,
+        barangay: newDeliveryRate.barangay,
+        zone: newDeliveryRate.zone,
+        surcharge,
+        is_active: newDeliveryRate.is_active,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.status === 401 || res.status === 403) {
+      handleAdminSessionExpired();
+      return;
+    }
+
+    if (!res.ok) {
+      setDeliveryRatesMessage({
+        type: 'error',
+        text: data.error || 'Unable to add the delivery area.',
+      });
+      return;
+    }
+
+    setNewDeliveryRate({
+      municipality: '',
+      barangay: '',
+      zone: '',
+      surcharge: '',
+      is_active: false,
+    });
+    setDeliveryRatesMessage({
+      type: 'success',
+      text: data.message || 'Delivery area added successfully.',
+    });
+    await fetchDeliveryRateSettings();
+  } catch (err) {
+    console.error('Error adding delivery rate:', err);
+    setDeliveryRatesMessage({
+      type: 'error',
+      text: 'Unable to connect to the delivery-rate service.',
+    });
+  } finally {
+    setAddingDeliveryRate(false);
   }
 };
 
@@ -2465,6 +3113,37 @@ const handleOrderAction = async (
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleOpeningReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setNewProduct((current) => ({ ...current, opening_receipt_image: '' }));
+      alert('Opening supplier receipt must be a JPG, PNG, or WEBP image.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setNewProduct((current) => ({ ...current, opening_receipt_image: '' }));
+      alert('Opening supplier receipt must not exceed 5 MB.');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setNewProduct((current) => ({
+        ...current,
+        opening_receipt_image: String(reader.result || ''),
+      }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const renderProductImage = (image: string, category: string, imgClass = "w-8 h-8 object-contain rounded-lg", spanClass = "text-3xl") => {
@@ -2527,6 +3206,14 @@ if (
     Number(newProduct.opening_supplier_price) <= 0
   ) {
     alert('Enter the opening supplier cost for the opening stock.');
+    return;
+  }
+
+  if (
+    !editingProduct &&
+    newProduct.opening_supplier_reference.trim().length > 120
+  ) {
+    alert('Supplier reference number must not exceed 120 characters.');
     return;
   }
 
@@ -2613,11 +3300,24 @@ if (
           newProduct.bulk_quantity_threshold
         ),
 
+  fulfillment_rule:
+    newProduct.fulfillment_rule,
+
   opening_supplier_price:
     newProduct.opening_supplier_price
       ? Number(
           newProduct.opening_supplier_price
         )
+      : null,
+
+  opening_supplier_reference:
+    !isEditing && Number(newProduct.stock) > 0
+      ? newProduct.opening_supplier_reference.trim() || null
+      : null,
+
+  opening_receipt_image:
+    !isEditing && Number(newProduct.stock) > 0
+      ? newProduct.opening_receipt_image || null
       : null,
 }),
     });
@@ -2659,7 +3359,10 @@ setNewProduct({
   status: 'active',
   delivery_class: 'standard',
   bulk_quantity_threshold: '',
+  fulfillment_rule: 'all',
   opening_supplier_price: '',
+  opening_supplier_reference: '',
+  opening_receipt_image: '',
 });
 
     setEditingProduct(null);
@@ -2681,10 +3384,25 @@ setNewProduct({
   }
 };
 
-  // Delete product
-const handleDeleteProduct = async (id: number) => {
+  // Activate/deactivate product without deleting transaction history.
+const handleToggleProductStatus = async (product: Product) => {
+  const currentStatus =
+    (product.status || 'active').toLowerCase() === 'inactive'
+      ? 'inactive'
+      : 'active';
+
+  const nextStatus: 'active' | 'inactive' =
+    currentStatus === 'active'
+      ? 'inactive'
+      : 'active';
+
+  const action =
+    nextStatus === 'inactive'
+      ? 'deactivate'
+      : 'activate';
+
   const confirmed = confirm(
-    'Are you sure you want to delete this product?'
+    `Are you sure you want to ${action} "${product.name}"?`
   );
 
   if (!confirmed) {
@@ -2700,12 +3418,16 @@ const handleDeleteProduct = async (id: number) => {
 
   try {
     const res = await fetch(
-      `/api/products/${id}`,
+      `/api/products/${product.id}/status`,
       {
-        method: 'DELETE',
+        method: 'PATCH',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({
+          status: nextStatus,
+        }),
       }
     );
 
@@ -2718,21 +3440,32 @@ const handleDeleteProduct = async (id: number) => {
 
     if (!res.ok) {
       alert(
-        data.error || 'Unable to delete product.'
+        data.error ||
+          `Unable to ${action} product.`
       );
       return;
+    }
+
+    // If a product is deactivated while it is already in the current
+    // POS cart, remove it immediately so it cannot be sold by mistake.
+    if (nextStatus === 'inactive') {
+      setPosCart((currentCart) =>
+        currentCart.filter(
+          (item) => item.product.id !== product.id
+        )
+      );
     }
 
     await fetchProducts();
 
   } catch (err) {
     console.error(
-      'Error deleting product:',
+      'Error updating product status:',
       err
     );
 
     alert(
-      'Unable to delete product.'
+      `Unable to ${action} product.`
     );
   }
 };
@@ -2741,7 +3474,10 @@ const handleDeleteProduct = async (id: number) => {
   const handleAddToPosCart = (
   product: Product
 ) => {
-  if (product.stock <= 0) {
+  if (
+    (product.status || 'active').toLowerCase() !== 'active' ||
+    product.stock <= 0
+  ) {
     return false;
   }
 
@@ -2822,6 +3558,24 @@ const handlePosBarcodeScan = (
     return;
   }
 
+  if (
+    (product.status || 'active').toLowerCase() !== 'active'
+  ) {
+    setPosBarcodeStatus('error');
+
+    setPosBarcodeMessage(
+      `${product.name} is inactive and cannot be added to a new POS sale.`
+    );
+
+    setPosBarcodeInput('');
+
+    window.setTimeout(() => {
+      posBarcodeInputRef.current?.focus();
+    }, 0);
+
+    return;
+  }
+
   if (product.stock <= 0) {
     setPosBarcodeStatus('error');
 
@@ -2870,17 +3624,328 @@ const handlePosBarcodeScan = (
   }, 0);
 };
 
-  const handleUpdatePosQty = (productId: number, amount: number) => {
-    const existing = posCart.find(item => item.product.id === productId);
-    if (!existing) return;
-    const newQty = existing.quantity + amount;
-    if (newQty <= 0) {
-      setPosCart(posCart.filter(item => item.product.id !== productId));
-    } else {
-      setPosCart(posCart.map(item => 
-        item.product.id === productId ? { ...item, quantity: newQty } : item
-      ));
+  const handleUpdatePosQty = (
+  productId: number,
+  amount: number
+) => {
+  setPosCart((currentCart) => {
+    const existing = currentCart.find(
+      (item) =>
+        item.product.id === productId
+    );
+
+    if (!existing) {
+      return currentCart;
     }
+
+    const newQty =
+      existing.quantity + amount;
+
+    // Keep the current minus-button behavior:
+    // decreasing 1 to 0 removes the item.
+    if (newQty <= 0) {
+      return currentCart.filter(
+        (item) =>
+          item.product.id !== productId
+      );
+    }
+
+    // Never allow POS quantity to exceed
+    // the product's current available stock.
+    if (
+      newQty >
+      Number(existing.product.stock)
+    ) {
+      return currentCart;
+    }
+
+    return currentCart.map(
+      (item) =>
+        item.product.id === productId
+          ? {
+              ...item,
+              quantity: newQty,
+            }
+          : item
+    );
+  });
+};
+
+const handleSetPosQty = (
+  productId: number,
+  value: string
+) => {
+  const parsedQty =
+    Number(value);
+
+  // Reject blank, invalid, decimal,
+  // zero, and negative quantities.
+  if (
+    !Number.isFinite(parsedQty) ||
+    !Number.isInteger(parsedQty) ||
+    parsedQty < 1
+  ) {
+    return;
+  }
+
+  setPosCart((currentCart) =>
+    currentCart.map((item) => {
+      if (
+        item.product.id !==
+        productId
+      ) {
+        return item;
+      }
+
+      const availableStock =
+        Number(item.product.stock);
+
+      // Clamp manually entered quantity
+      // to current available stock.
+      const validQty =
+        Math.min(
+          parsedQty,
+          availableStock
+        );
+
+      return {
+        ...item,
+        quantity: validQty,
+      };
+    })
+  );
+};
+
+  const handlePrintOrderSlip = (order: Order) => {
+    const printWindow = window.open('', '_blank', 'width=900,height=760');
+
+    if (!printWindow) {
+      alert('The print window was blocked by the browser. Please allow pop-ups for this site and try again.');
+      return;
+    }
+
+    printWindow.opener = null;
+
+    const fulfillmentLabel =
+      order.fulfillment === 'shop_go'
+        ? 'Shop & Go'
+        : order.fulfillment === 'delivery'
+          ? 'Delivery'
+          : 'Pickup';
+
+    const statusLabel =
+      order.status === 'ready'
+        ? 'Ready for Pickup'
+        : order.status === 'awaiting_payment'
+          ? 'Awaiting Payment'
+          : order.status === 'out_for_delivery'
+            ? 'Out for Delivery'
+            : order.status === 'failed_delivery'
+              ? 'Failed Delivery'
+              : order.status.split('_').join(' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+    const rawPaymentStatus = String(order.payment_status || 'Pending');
+    const paymentStatusLabel =
+      rawPaymentStatus.toLowerCase() === 'pending'
+        ? 'Pending / Not Paid'
+        : rawPaymentStatus;
+
+    const customerName = [order.customer_first_name, order.customer_last_name]
+      .filter(Boolean)
+      .join(' ') || 'Customer information unavailable';
+
+    const orderDate = order.created_at
+      ? new Date(order.created_at).toLocaleString('en-PH', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : 'Unavailable';
+
+    const itemRows = order.items
+      .map((item) => {
+        const quantity = Number(item.quantity || 0);
+        const unitPrice = Number(item.order_item_price ?? item.product.price ?? 0);
+        const subtotal = Number(item.order_item_subtotal ?? quantity * unitPrice);
+
+        return `
+          <tr>
+            <td>${escapeReportHtml(item.product.name)}</td>
+            <td class="center">${quantity}</td>
+            <td class="right">${formatPeso(unitPrice)}</td>
+            <td class="right">${formatPeso(subtotal)}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const serviceFee = Number(order.service_fee || 0);
+    const deliveryFee = Number(order.delivery_fee || 0);
+    const discountAmount = Number(order.discount_amount || 0);
+    const originalSubtotal = Number(
+      order.original_subtotal ?? (Number(order.total || 0) + discountAmount)
+    );
+    const grandTotal = Number(order.total || 0) + serviceFee + deliveryFee;
+
+    const shopGoSection =
+      order.fulfillment === 'shop_go'
+        ? `
+          <div class="section">
+            <div class="section-title">Shop &amp; Go Pickup Information</div>
+            <div class="detail-grid">
+              <div>
+                <div class="label">Requested Pickup</div>
+                <div class="value">${escapeReportHtml(
+                  [order.requested_pickup_date, order.requested_pickup_time]
+                    .filter(Boolean)
+                    .join(' · ') || 'Not specified'
+                )}</div>
+              </div>
+              <div>
+                <div class="label">Confirmed Pickup</div>
+                <div class="value">${escapeReportHtml(
+                  [order.scheduled_pickup_date, order.scheduled_pickup_time]
+                    .filter(Boolean)
+                    .join(' · ') || 'Not yet confirmed'
+                )}</div>
+              </div>
+            </div>
+          </div>
+        `
+        : '';
+
+    const deliverySection =
+      order.fulfillment === 'delivery'
+        ? `
+          <div class="section">
+            <div class="section-title">Delivery Information</div>
+            <div class="detail-grid">
+              <div>
+                <div class="label">Contact Person</div>
+                <div class="value">${escapeReportHtml(order.delivery_contact_person || customerName)}</div>
+              </div>
+              <div>
+                <div class="label">Contact Number</div>
+                <div class="value">${escapeReportHtml(order.delivery_contact_number || order.customer_phone_number || 'Not provided')}</div>
+              </div>
+              <div>
+                <div class="label">Municipality</div>
+                <div class="value">${escapeReportHtml(order.delivery_municipality || 'Initao')}</div>
+              </div>
+              <div>
+                <div class="label">Barangay</div>
+                <div class="value">${escapeReportHtml(order.delivery_barangay || 'Not provided')}</div>
+              </div>
+              <div>
+                <div class="label">Load Class</div>
+                <div class="value">${escapeReportHtml(order.delivery_load_class || 'Not available')}</div>
+              </div>
+              <div class="detail-full">
+                <div class="label">Delivery Address</div>
+                <div class="value">${escapeReportHtml(order.delivery_address || 'Not provided')}</div>
+              </div>
+              <div class="detail-full">
+                <div class="label">Landmark / Instructions</div>
+                <div class="value">${escapeReportHtml(
+                  [order.delivery_landmark, order.delivery_instructions]
+                    .filter(Boolean)
+                    .join(' · ') || 'None provided'
+                )}</div>
+              </div>
+            </div>
+          </div>
+        `
+        : '';
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <title>Rayjin Hardware Order Slip - ${escapeReportHtml(order.id)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; padding: 30px; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #fff; }
+            .slip { max-width: 820px; margin: 0 auto; border: 1px solid #d1d5db; padding: 28px; }
+            .header { text-align: center; border-bottom: 2px solid #1f513a; padding-bottom: 18px; margin-bottom: 22px; }
+            .header h1 { margin: 0; font-size: 24px; color: #1f513a; }
+            .header h2 { margin: 6px 0 0; font-size: 16px; letter-spacing: 1px; }
+            .status-row { margin-top: 12px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+            .badge { display: inline-block; border: 1px solid #b7c8be; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-bottom: 20px; font-size: 13px; }
+            .section { margin-top: 20px; }
+            .section-title { font-size: 13px; font-weight: bold; text-transform: uppercase; color: #1f513a; border-bottom: 1px solid #d1d5db; padding-bottom: 6px; margin-bottom: 10px; }
+            .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; font-size: 13px; }
+            .detail-full { grid-column: 1 / -1; }
+            .label { color: #6b7280; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+            .value { margin-top: 2px; font-weight: 600; white-space: pre-wrap; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 9px 7px; text-align: left; }
+            th { background: #f3f7f4; color: #1f513a; font-size: 10px; text-transform: uppercase; }
+            .center { text-align: center; }
+            .right { text-align: right; }
+            .summary { width: 340px; margin-left: auto; margin-top: 18px; }
+            .summary-row { display: flex; justify-content: space-between; gap: 20px; padding: 5px 0; font-size: 13px; }
+            .total { margin-top: 5px; padding-top: 9px; border-top: 2px solid #1f513a; font-size: 16px; }
+            .note { border: 1px solid #dbe7df; background: #f7faf8; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+            .footer { margin-top: 34px; border-top: 1px solid #d1d5db; padding-top: 12px; text-align: center; font-size: 10px; color: #6b7280; }
+            @media print { body { padding: 0; } .slip { border: none; max-width: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="slip">
+            <div class="header">
+              <h1>RAYJIN HARDWARE</h1>
+              <h2>ORDER / FULFILLMENT SLIP</h2>
+              <div class="status-row">
+                <span class="badge">Order Status: ${escapeReportHtml(statusLabel)}</span>
+                <span class="badge">Payment: ${escapeReportHtml(paymentStatusLabel)}</span>
+                <span class="badge">${escapeReportHtml(fulfillmentLabel)}</span>
+              </div>
+            </div>
+
+            <div class="meta">
+              <div><div class="label">Order Reference</div><div class="value">${escapeReportHtml(order.id)}</div></div>
+              <div><div class="label">Order Date</div><div class="value">${escapeReportHtml(orderDate)}</div></div>
+              <div><div class="label">Customer Name</div><div class="value">${escapeReportHtml(customerName)}</div></div>
+              <div><div class="label">Customer Contact</div><div class="value">${escapeReportHtml(order.customer_phone_number || 'Not provided')}</div></div>
+              <div><div class="label">Email</div><div class="value">${escapeReportHtml(order.customer_email || 'Not provided')}</div></div>
+              <div><div class="label">Payment Method</div><div class="value">${escapeReportHtml(formatPaymentMethod(order.payment_method || order.paymentMethod || 'cash'))}</div></div>
+            </div>
+
+            ${shopGoSection}
+            ${deliverySection}
+
+            <div class="section">
+              <div class="section-title">Ordered Products</div>
+              <table>
+                <thead><tr><th>Product</th><th class="center">Qty</th><th class="right">Unit Price</th><th class="right">Subtotal</th></tr></thead>
+                <tbody>${itemRows}</tbody>
+              </table>
+            </div>
+
+            <div class="summary">
+              ${discountAmount > 0 ? `<div class="summary-row"><span>Original Product Subtotal</span><strong>${formatPeso(originalSubtotal)}</strong></div>` : ''}
+              ${discountAmount > 0 ? `<div class="summary-row"><span>First-Order Discount (20%)</span><strong>-${formatPeso(discountAmount)}</strong></div>` : ''}
+              <div class="summary-row"><span>Product Subtotal</span><strong>${formatPeso(Number(order.total || 0))}</strong></div>
+              ${serviceFee > 0 ? `<div class="summary-row"><span>Shop & Go Service Fee</span><strong>${formatPeso(serviceFee)}</strong></div>` : ''}
+              ${deliveryFee > 0 || order.fulfillment === 'delivery' ? `<div class="summary-row"><span>Delivery Fee</span><strong>${formatPeso(deliveryFee)}</strong></div>` : ''}
+              <div class="summary-row total"><span>Total Amount</span><strong>${formatPeso(grandTotal)}</strong></div>
+            </div>
+
+            <div class="footer">
+              Generated from Rayjin Hardware Admin Fulfillment Center. Status and payment information reflect the order record at the time this slip was printed.
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+
+    window.setTimeout(() => {
+      printWindow.print();
+    }, 250);
   };
 
   const handlePrintPosDeliverySlip = (
@@ -3175,6 +4240,15 @@ const handlePosBarcodeScan = (
               </div>
 
               <div>
+                <div class="label">Municipality</div>
+                <div class="value">
+                  ${escapeReportHtml(
+                    receipt.municipality
+                  )}
+                </div>
+              </div>
+
+              <div>
                 <div class="label">Barangay</div>
                 <div class="value">
                   ${escapeReportHtml(
@@ -3313,11 +4387,18 @@ const handleCheckoutPOS = async (
     ? Number(posDeliveryDetails.delivery_fee)
     : 0;
 
+  if (posCartRequiresDelivery && posFulfillment !== 'delivery') {
+    alert('This POS cart contains a Delivery-only product. Use Deliver Out to continue.');
+    setPosFulfillment('delivery');
+    return;
+  }
+
   if (posFulfillment === 'delivery') {
     if (
       !posDeliveryDetails.customer_name.trim() ||
       !posDeliveryDetails.contact_person.trim() ||
       !posDeliveryDetails.contact_number.trim() ||
+      !posDeliveryDetails.municipality ||
       !posDeliveryDetails.barangay ||
       !posDeliveryDetails.address.trim()
     ) {
@@ -3400,7 +4481,7 @@ const handleCheckoutPOS = async (
           `${item.product.id}:${item.quantity}`
       )
       .sort()
-      .join('|') + `|${posFulfillment}|${deliveryFee}|${posDeliveryDetails.contact_number}`;
+      .join('|') + `|${posFulfillment}|${deliveryFee}|${posDeliveryDetails.contact_number}|${posDeliveryDetails.municipality}|${posDeliveryDetails.barangay}`;
 
   const pendingRequestKey =
     'rayjin_pos_pending_request';
@@ -3487,6 +4568,7 @@ const handleCheckoutPOS = async (
           customerName: posDeliveryDetails.customer_name,
           deliveryContactPerson: posDeliveryDetails.contact_person,
           deliveryContactNumber: posDeliveryDetails.contact_number,
+          deliveryMunicipality: posDeliveryDetails.municipality,
           deliveryBarangay: posDeliveryDetails.barangay,
           deliveryAddress: posDeliveryDetails.address,
           deliveryLandmark: posDeliveryDetails.landmark,
@@ -3551,6 +4633,9 @@ if (posFulfillment === 'delivery') {
     contactNumber:
       posDeliveryDetails.contact_number.trim(),
 
+    municipality:
+      posDeliveryDetails.municipality,
+
     barangay:
       posDeliveryDetails.barangay,
 
@@ -3597,7 +4682,7 @@ if (posFulfillment === 'delivery') {
     setPosCardPaymentConfirmed(false);
     setPosFulfillment('pickup');
     setPosDeliveryDetails({
-      customer_name: '', contact_person: '', contact_number: '', barangay: '',
+      customer_name: '', contact_person: '', contact_number: '', municipality: '', barangay: '',
       address: '', landmark: '', delivery_fee: '',
     });
 
@@ -3694,18 +4779,18 @@ const lowStockProducts = products.filter(
           { key: 'completed', label: 'Completed' },
         ]
       : order.fulfillment === 'pickup'
-        ? [
-  { key: 'pending', label: 'Pending' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'processing', label: 'Processing' },
-  { key: 'ready', label: 'Ready for Pickup' },
-  { key: 'completed', label: 'Completed' },
-]
+  ? [
+      { key: 'pending', label: 'Pending' },
+      { key: 'approved', label: 'Awaiting Arrival' },
+      { key: 'processing', label: 'Processing' },
+      { key: 'ready', label: 'Ready for Pickup' },
+      { key: 'completed', label: 'Completed' },
+    ]
         : [
             { key: 'pending', label: 'Pending' },
             { key: 'approved', label: 'Approved' },
             { key: 'processing', label: 'Processing' },
-            { key: 'ready', label: 'Ready for Pickup' },
+            { key: 'ready', label: 'Ready for Express Pickup' },
             { key: 'completed', label: 'Completed' },
           ]
   );
@@ -3719,25 +4804,576 @@ const lowStockProducts = products.filter(
     return order.status;
   };
 
-  const getAdminOrderStatusLabel = (order: Order) => {
-    if (order.fulfillment === 'pickup') {
+const hasSuccessfulOnlinePayment = (
+  order: Order
+) => isPaidOnlineOrder(order);
+
+const pickupArrivalDeadline = (
+  order: Order
+) => {
+  if (!order.created_at) {
+    return null;
+  }
+
+  const createdAt =
+    new Date(order.created_at);
+
+  if (
+    Number.isNaN(
+      createdAt.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return new Date(
+    createdAt.getTime() +
+      48 * 60 * 60 * 1000
+  );
+};
+
+const deliveryVerificationDeadline = (
+  order: Order
+) => {
+  if (
+    order.fulfillment !== 'delivery' ||
+    !order.created_at
+  ) {
+    return null;
+  }
+
+  const createdAt =
+    new Date(order.created_at);
+
+  if (
+    Number.isNaN(
+      createdAt.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return new Date(
+    createdAt.getTime() +
+      48 * 60 * 60 * 1000
+  );
+};
+
+const paymentReviewPoint = (
+  order: Order
+) => {
+  const value =
+    order.created_at ||
+    order.date;
+
+  if (!value) {
+    return null;
+  }
+
+  const createdAt =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      createdAt.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return new Date(
+    createdAt.getTime() +
+      48 * 60 * 60 * 1000
+  );
+};
+
+const hasReachedPaymentReviewPoint = (
+  order: Order
+) => {
+  const reviewPoint = paymentReviewPoint(order);
+
+  return Boolean(
+    reviewPoint &&
+      pickupDeadlineNow >= reviewPoint.getTime()
+  );
+};
+
+const canCancelStandardOrder = (
+  order: Order
+) => {
+  if (order.fulfillment === 'delivery') {
+    return false;
+  }
+
+  if (
+    ['approved', 'processing', 'ready'].includes(
+      order.status
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    order.status === 'awaiting_payment' &&
+    hasReachedPaymentReviewPoint(order)
+  );
+};
+
+const canPermanentlyCancelDelivery = (
+  order: Order
+) => {
+  if (order.fulfillment !== 'delivery') {
+    return false;
+  }
+
+  if (
+    [
+      'approved',
+      'processing',
+      'deactivated',
+      'failed_delivery',
+    ].includes(order.status)
+  ) {
+    return true;
+  }
+
+  return (
+    order.status === 'awaiting_payment' &&
+    hasReachedPaymentReviewPoint(order)
+  );
+};
+
+const canDeactivateDeliveryOrder = (
+  order: Order
+) =>
+  order.fulfillment === 'delivery' &&
+  ['approved', 'processing'].includes(order.status);
+
+const shopGoVerificationDeadline = (
+  order: Order
+) => {
+  if (
+    order.fulfillment !== 'shop_go' ||
+    !order.created_at
+  ) {
+    return null;
+  }
+
+  const createdAt =
+    new Date(order.created_at);
+
+  if (
+    Number.isNaN(
+      createdAt.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return new Date(
+    createdAt.getTime() +
+      48 * 60 * 60 * 1000
+  );
+};
+
+const shopGoScheduleDateTime = (
+  dateValue?: string | null,
+  timeValue?: string | null
+) => {
+  if (!dateValue || !timeValue) {
+    return null;
+  }
+
+  const rawDate =
+    String(dateValue);
+
+  let datePart = '';
+
+  if (
+    /^\d{4}-\d{2}-\d{2}$/.test(
+      rawDate
+    )
+  ) {
+    datePart = rawDate;
+  } else {
+    const parsedDate =
+      new Date(rawDate);
+
+    if (
+      Number.isNaN(
+        parsedDate.getTime()
+      )
+    ) {
+      return null;
+    }
+
+    const parts =
+      new Intl.DateTimeFormat(
+        'en-US',
+        {
+          timeZone:
+            'Asia/Manila',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }
+      ).formatToParts(
+        parsedDate
+      );
+
+    const year =
+      parts.find(
+        (part) =>
+          part.type === 'year'
+      )?.value;
+
+    const month =
+      parts.find(
+        (part) =>
+          part.type === 'month'
+      )?.value;
+
+    const day =
+      parts.find(
+        (part) =>
+          part.type === 'day'
+      )?.value;
+
+    if (
+      !year ||
+      !month ||
+      !day
+    ) {
+      return null;
+    }
+
+    datePart =
+      `${year}-${month}-${day}`;
+  }
+
+  const timeMatch =
+    String(timeValue).match(
+      /^(\d{1,2}):(\d{2})/
+    );
+
+  if (!timeMatch) {
+    return null;
+  }
+
+  const hour =
+    timeMatch[1].padStart(
+      2,
+      '0'
+    );
+
+  const minute =
+    timeMatch[2];
+
+  const value =
+    new Date(
+      `${datePart}T${hour}:${minute}:00+08:00`
+    );
+
+  if (
+    Number.isNaN(
+      value.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return value;
+};
+
+const formatPickupDeadline = (
+  value: Date
+) => {
+  const datePart =
+    new Intl.DateTimeFormat(
+      'en-PH',
+      {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      }
+    ).format(value);
+
+  const timePart =
+    new Intl.DateTimeFormat(
+      'en-PH',
+      {
+        timeZone: 'Asia/Manila',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }
+    ).format(value);
+
+  return `${datePart} at ${timePart} (PHT)`;
+};
+
+const formatPickupTimeRemaining = (
+  deadline: Date
+) => {
+  const difference =
+    deadline.getTime() -
+    pickupDeadlineNow;
+
+  if (difference <= 0) {
+    return 'Deadline reached';
+  }
+
+  const totalMinutes =
+    Math.ceil(
+      difference /
+      (60 * 1000)
+    );
+
+  const days =
+    Math.floor(
+      totalMinutes /
+      (24 * 60)
+    );
+
+  const hours =
+    Math.floor(
+      (totalMinutes %
+        (24 * 60)) /
+      60
+    );
+
+  const minutes =
+    totalMinutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m remaining`;
+  }
+
+  return `${hours}h ${minutes}m remaining`;
+};
+
+
+const pickup48HourPolicyApplies = (
+  order: Order
+) => {
+  return (
+    order.fulfillment === 'pickup' &&
+    !hasSuccessfulOnlinePayment(order) &&
+    [
+      'pending',
+      'approved'
+    ].includes(order.status)
+  );
+};
+
+const delivery48HourPolicyApplies = (
+  order: Order
+) => {
+  return (
+    order.fulfillment === 'delivery' &&
+    order.status === 'pending' &&
+    !hasSuccessfulOnlinePayment(order)
+  );
+};
+
+const shopGo48HourPolicyApplies = (
+  order: Order
+) => {
+  const paymentMethod =
+    String(
+      order.payment_method ||
+      order.paymentMethod ||
+      'cash'
+    )
+      .trim()
+      .toLowerCase();
+
+  return (
+    order.fulfillment === 'shop_go' &&
+    order.status === 'pending' &&
+    paymentMethod === 'cash'
+  );
+};
+
+const getPickupVerificationStatus = (
+  order: Order
+) => {
   if (order.status === 'pending') {
-    return 'For Approval';
+    return 'Awaiting Admin Approval';
   }
 
-  if (order.status === 'awaiting_payment') {
-    return 'Required Payment';
+  if (order.status === 'approved') {
+    return 'Awaiting Customer Arrival / Order ID Verification';
   }
-}
 
-    if (order.status === 'ready') return 'Ready for Pickup';
-    return order.status.split('_').join(' ');
-  };
+  return getAdminOrderStatusLabel(order);
+};
+
+ const getAdminOrderStatusLabel = (order: Order) => {
+  if (order.fulfillment === 'pickup') {
+    if (order.status === 'pending') {
+      return 'For Approval';
+    }
+
+    if (order.status === 'awaiting_payment') {
+      return 'Required Payment';
+    }
+
+    if (order.status === 'approved') {
+      return 'Awaiting Customer Arrival';
+    }
+  }
+
+  if (
+    order.fulfillment === 'shop_go' &&
+    order.status === 'ready'
+  ) {
+    return 'Ready for Express Pickup';
+  }
+
+  if (order.status === 'ready') {
+    return 'Ready for Pickup';
+  }
+
+  return order.status.split('_').join(' ');
+};
   const sortedOrders = [...orders].sort((first, second) => {
     const priorityDifference = orderStatusPriority[first.status] - orderStatusPriority[second.status];
     if (priorityDifference !== 0) return priorityDifference;
-    return new Date(second.date).getTime() - new Date(first.date).getTime();
+
+    const firstDate =
+      new Date(
+        first.created_at ||
+        first.date
+      ).getTime();
+
+    const secondDate =
+      new Date(
+        second.created_at ||
+        second.date
+      ).getTime();
+
+    return secondDate - firstDate;
   });
+
+const getAdminOrderGroup = (
+  order: Order
+): 'active' | 'completed' | 'closed' => {
+  if (order.status === 'completed') {
+    return 'completed';
+  }
+
+  if (
+    order.status === 'cancelled' ||
+    order.status === 'rejected'
+  ) {
+    return 'closed';
+  }
+
+  return 'active';
+};
+
+const getAdminOrderGroupLabel = (
+  group: 'active' | 'completed' | 'closed'
+) => {
+  if (group === 'completed') {
+    return 'Completed';
+  }
+
+  if (group === 'closed') {
+    return 'Closed Orders';
+  }
+
+  return 'Active / In Progress';
+};
+
+const getAdminOrderGroupDescription = (
+  group: 'active' | 'completed' | 'closed'
+) => {
+  if (group === 'completed') {
+    return 'Finished online orders retained for transaction history.';
+  }
+
+  if (group === 'closed') {
+    return 'Cancelled or rejected online order records.';
+  }
+
+  return 'Orders that still need payment, review, preparation, pickup, or delivery.';
+};
+
+  // Convert each order's stored date into the same local YYYY-MM-DD
+// format used by the HTML date filter. This avoids UTC/date-shift issues.
+const getOrderDateFilterValue = (order: Order) => {
+  const rawDate =
+    order.created_at ||
+    order.date;
+
+  if (!rawDate) {
+    return '';
+  }
+
+  const parsedDate = new Date(rawDate);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return String(rawDate).slice(0, 10);
+  }
+
+  const year =
+    parsedDate.getFullYear();
+
+  const month =
+    String(parsedDate.getMonth() + 1)
+      .padStart(2, '0');
+
+  const day =
+    String(parsedDate.getDate())
+      .padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+};
+
+const normalizedOrderSearch =
+  orderSearch.trim().toLowerCase();
+
+const filteredOrders =
+  sortedOrders.filter((order) => {
+    const matchesSearch =
+      !normalizedOrderSearch ||
+      order.id
+        .toLowerCase()
+        .includes(normalizedOrderSearch);
+
+    const matchesDate =
+      !orderDateFilter ||
+      getOrderDateFilterValue(order) ===
+        orderDateFilter;
+
+    const matchesStatus =
+      orderStatusFilter === 'all' ||
+      order.status === orderStatusFilter;
+
+    return (
+      matchesSearch &&
+      matchesDate &&
+      matchesStatus
+    );
+  });
+
+const hasActiveOrderFilters =
+  Boolean(
+    orderSearch.trim() ||
+    orderDateFilter ||
+    orderStatusFilter !== 'all'
+  );
+
+const clearOrderFilters = () => {
+  setOrderSearch('');
+  setOrderDateFilter('');
+  setOrderStatusFilter('all');
+};
+
+
 
   // Dashboard-only summaries. These reuse the existing order, sales, and
   // inventory state, so the redesigned overview remains connected to the
@@ -3767,41 +5403,6 @@ const lowStockProducts = products.filter(
       order.status === 'cancelled' ||
       order.status === 'rejected'
   ).length;
-
-  const dashboardOrderTotal = Math.max(
-    dashboardPendingCount +
-      dashboardProcessingCount +
-      completedOrderCount +
-      dashboardCancelledCount,
-    1
-  );
-
-  const completedOrderPercent =
-    (completedOrderCount / dashboardOrderTotal) * 100;
-
-  const pendingOrderPercent =
-    (dashboardPendingCount / dashboardOrderTotal) * 100;
-
-  const processingOrderPercent =
-    (dashboardProcessingCount / dashboardOrderTotal) * 100;
-
-  const dashboardStatusGradient =
-    orders.length === 0
-      ? '#E5ECE8'
-      : `conic-gradient(
-          #15944F 0 ${completedOrderPercent}%,
-          #F59E0B ${completedOrderPercent}% ${completedOrderPercent + pendingOrderPercent}%,
-          #3B82F6 ${completedOrderPercent + pendingOrderPercent}% ${completedOrderPercent + pendingOrderPercent + processingOrderPercent}%,
-          #DC2626 ${completedOrderPercent + pendingOrderPercent + processingOrderPercent}% 100%
-        )`;
-
-  const recentDashboardOrders = [...orders]
-    .sort(
-      (firstOrder, secondOrder) =>
-        new Date(secondOrder.date).getTime() -
-        new Date(firstOrder.date).getTime()
-    )
-    .slice(0, 5);
 
   const dashboardSalesDays = Array.from(
     { length: 7 },
@@ -3841,11 +5442,6 @@ const lowStockProducts = products.filter(
     }
   );
 
-  const dashboardMaximumRevenue = Math.max(
-    ...dashboardSalesDays.map((day) => day.revenue),
-    1
-  );
-
   const posProductSubtotal = posCart.reduce(
   (sum, item) =>
     sum +
@@ -3870,7 +5466,13 @@ const posLoadClass = posCart.reduce<DeliveryLoadClass>((highest, item) => {
     : highest;
 }, 'light');
 const posSelectedRate = deliveryRateSettings.find(
-  (rate) => rate.barangay === posDeliveryDetails.barangay && rate.is_active
+  (rate) =>
+    rate.municipality === posDeliveryDetails.municipality &&
+    rate.barangay === posDeliveryDetails.barangay &&
+    rate.is_active
+);
+const posAvailableBarangays = deliveryRateSettings.filter(
+  (rate) => rate.municipality === posDeliveryDetails.municipality && rate.is_active
 );
 const posSuggestedDeliveryFee = posFulfillment === 'delivery' && posSelectedRate
   ? ({ light: 60, standard: 150, bulky: 300 }[posLoadClass] + Number(posSelectedRate.surcharge))
@@ -3906,6 +5508,13 @@ const posChange =
 
 const filteredPosProducts =
   products.filter((product) => {
+    const productIsActive =
+      (product.status || 'active').toLowerCase() === 'active';
+
+    if (!productIsActive) {
+      return false;
+    }
+
     const query =
       posSearch.trim().toLowerCase();
 
@@ -4126,6 +5735,9 @@ const filteredInventoryMovements =
       (movement.remarks || '')
         .toLowerCase()
         .includes(query) ||
+      (movement.supplier_reference || '')
+        .toLowerCase()
+        .includes(query) ||
       reference
         .toLowerCase()
         .includes(query);
@@ -4134,6 +5746,10 @@ const filteredInventoryMovements =
       movementTypeFilter === 'all' ||
       movement.movement_type ===
         movementTypeFilter;
+
+    const matchesSource =
+      movementSourceFilter === 'all' ||
+      movement.source_label === movementSourceFilter;
 
     const matchesCategory =
       movementCategoryFilter === 'all' ||
@@ -4172,27 +5788,25 @@ const filteredInventoryMovements =
     return (
       matchesSearch &&
       matchesType &&
+      matchesSource &&
       matchesCategory &&
       matchesDate
     );
   });
 
-const receivedStockHistory = inventoryMovements.filter((movement) => {
-  if (movement.movement_type !== 'Stock-In' || movement.remarks === 'Opening Inventory') return false;
-  const query = stockReceivingSearch.trim().toLowerCase();
-  const searchable = [
-    movement.product_name,
-    movement.barcode,
-    movement.supplier_name,
-    movement.reference_label,
-  ].filter(Boolean).join(' ').toLowerCase();
-  if (query && !searchable.includes(query)) return false;
+const recentStockInMovements = inventoryMovements
+  .filter((movement) => movement.movement_type === 'Stock-In')
+  .slice(0, 5);
 
-  const movementDate = new Date(movement.movement_date);
-  if (stockReceivingDateFrom && movementDate < new Date(`${stockReceivingDateFrom}T00:00:00`)) return false;
-  if (stockReceivingDateTo && movementDate > new Date(`${stockReceivingDateTo}T23:59:59.999`)) return false;
-  return true;
-});
+const openAllStockInMovements = () => {
+  setMovementSearch('');
+  setMovementTypeFilter('Stock-In');
+  setMovementSourceFilter('all');
+  setMovementCategoryFilter('all');
+  setMovementDateFrom('');
+  setMovementDateTo('');
+  setActiveTab('movementHistory');
+};
 
 const productSelectorLabel = (product: Product) =>
   `${product.name} — ${product.barcode || 'No barcode'} — Stock: ${product.stock}`;
@@ -4299,6 +5913,7 @@ const filteredSalesHistory = salesHistory.filter(
       sale.sales_source,
       sale.payment_method,
       sale.payment_status,
+      sale.adjustment_state,
     ]
       .filter(Boolean)
       .join(' ')
@@ -4314,29 +5929,63 @@ const filteredSalesHistory = salesHistory.filter(
   }
 );
 
-const filteredSalesSummary =
-  filteredSalesHistory.reduce(
-    (summary, sale) => {
-      summary.total_sales += 1;
-      summary.total_revenue += Number(
-        sale.revenue
-      );
-      summary.total_cogs += Number(
-        sale.cogs
-      );
-      summary.total_gross_profit += Number(
-        sale.gross_profit
-      );
-
-      return summary;
+const filteredSalesSummary = (() => {
+  const summary = filteredSalesHistory.reduce(
+    (totals, sale) => {
+      totals.total_sales += 1;
+      totals.total_gross_merchandise_sales += Number(sale.gross_merchandise_sales || 0);
+      totals.total_discounts += Number(sale.discount_amount || 0);
+      totals.total_merchandise_refunds += Number(sale.merchandise_refunds || 0);
+      totals.total_net_merchandise_sales += Number(sale.net_merchandise_sales || 0);
+      totals.total_service_fee_refunds += Number(sale.service_fee_refunds || 0);
+      totals.total_delivery_fee_refunds += Number(sale.delivery_fee_refunds || 0);
+      totals.total_service_revenue += Number(sale.service_revenue || 0);
+      totals.total_delivery_revenue += Number(sale.delivery_revenue || 0);
+      totals.total_fee_revenue += Number(sale.fee_revenue || 0);
+      totals.total_refunds += Number(sale.total_refunds || 0);
+      totals.total_revenue += Number(sale.total_revenue || sale.revenue || 0);
+      totals.total_original_cogs += Number(sale.original_cogs || 0);
+      totals.total_cogs_reversed += Number(sale.cogs_reversed || 0);
+      totals.total_cogs += Number(sale.cogs || 0);
+      totals.total_gross_profit += Number(sale.gross_profit || 0);
+      totals.total_items_sold += Number(sale.net_quantity ?? sale.total_quantity ?? 0);
+      totals.total_items_returned += Number(sale.returned_quantity || 0);
+      totals.total_adjustments += Number(sale.adjustment_count || 0);
+      totals.total_voided_sales += Number(sale.void_count || 0) > 0 ? 1 : 0;
+      return totals;
     },
     {
       total_sales: 0,
+      total_gross_merchandise_sales: 0,
+      total_discounts: 0,
+      total_merchandise_refunds: 0,
+      total_net_merchandise_sales: 0,
+      total_service_fee_refunds: 0,
+      total_delivery_fee_refunds: 0,
+      total_service_revenue: 0,
+      total_delivery_revenue: 0,
+      total_fee_revenue: 0,
+      total_refunds: 0,
       total_revenue: 0,
+      total_original_cogs: 0,
+      total_cogs_reversed: 0,
       total_cogs: 0,
       total_gross_profit: 0,
+      total_gross_profit_margin: 0,
+      total_items_sold: 0,
+      total_items_returned: 0,
+      total_adjustments: 0,
+      total_voided_sales: 0,
     }
   );
+
+  summary.total_gross_profit_margin =
+    summary.total_net_merchandise_sales > 0
+      ? (summary.total_gross_profit / summary.total_net_merchandise_sales) * 100
+      : 0;
+
+  return summary;
+})();
 
 const normalizedReportSearch = reportSearch.trim().toLowerCase();
 
@@ -4520,6 +6169,7 @@ const reportLowStockRows =
       movement.movement_type,
       movement.source_label,
       movement.supplier_name,
+      movement.supplier_reference,
       reference,
       movement.remarks,
       movement.recorded_by,
@@ -4530,31 +6180,104 @@ const reportLowStockRows =
       .includes(normalizedReportSearch);
   });
 
-const reportSalesSummary = reportSalesRows.reduce(
-  (summary, sale) => ({
-    totalSales: summary.totalSales + 1,
-    revenue: summary.revenue + Number(sale.revenue || 0),
-    cost: summary.cost + Number(sale.cogs || 0),
-    grossProfit:
-      summary.grossProfit + Number(sale.gross_profit || 0),
-  }),
-  { totalSales: 0, revenue: 0, cost: 0, grossProfit: 0 }
+const reportSalesSummary = (() => {
+  const summary = reportSalesRows.reduce(
+    (totals, sale) => ({
+      totalSales: totals.totalSales + 1,
+      grossMerchandiseSales:
+        totals.grossMerchandiseSales + Number(sale.gross_merchandise_sales || 0),
+      discounts: totals.discounts + Number(sale.discount_amount || 0),
+      refunds: totals.refunds + Number(sale.total_refunds || 0),
+      netMerchandiseSales:
+        totals.netMerchandiseSales + Number(sale.net_merchandise_sales || 0),
+      feeRevenue: totals.feeRevenue + Number(sale.fee_revenue || 0),
+      totalRevenue:
+        totals.totalRevenue + Number(sale.total_revenue || sale.revenue || 0),
+      cost: totals.cost + Number(sale.cogs || 0),
+      grossProfit: totals.grossProfit + Number(sale.gross_profit || 0),
+      grossMargin: 0,
+    }),
+    {
+      totalSales: 0,
+      grossMerchandiseSales: 0,
+      discounts: 0,
+      refunds: 0,
+      netMerchandiseSales: 0,
+      feeRevenue: 0,
+      totalRevenue: 0,
+      cost: 0,
+      grossProfit: 0,
+      grossMargin: 0,
+    }
+  );
+
+  summary.grossMargin =
+    summary.netMerchandiseSales > 0
+      ? (summary.grossProfit / summary.netMerchandiseSales) * 100
+      : 0;
+
+  return summary;
+})();
+
+const inventoryCostByProduct = inventoryMovements.reduce(
+  (costs, movement) => {
+    const productId = Number(movement.product_id);
+    const movementValue =
+      Number(movement.quantity || 0) * Number(movement.supplier_price || 0);
+    const direction = movement.movement_type === 'Stock-In' ? 1 : -1;
+    costs.set(productId, (costs.get(productId) || 0) + direction * movementValue);
+    return costs;
+  },
+  new Map<number, number>()
 );
+
+const getInventoryCostValue = (product: Product) =>
+  Math.max(0, Number((inventoryCostByProduct.get(product.id) || 0).toFixed(2)));
+
+const getAverageInventoryCost = (product: Product) => {
+  const stock = Number(product.stock || 0);
+  if (stock <= 0) return 0;
+  return Number((getInventoryCostValue(product) / stock).toFixed(2));
+};
 
 const reportInventorySummary = reportInventoryRows.reduce(
   (summary, product) => ({
     products: summary.products + 1,
     units: summary.units + Number(product.stock || 0),
-    stockValue:
-      summary.stockValue +
+    inventoryCostValue: summary.inventoryCostValue + getInventoryCostValue(product),
+    retailValue:
+      summary.retailValue +
       Number(product.stock || 0) * Number(product.price || 0),
   }),
-  { products: 0, units: 0, stockValue: 0 }
+  { products: 0, units: 0, inventoryCostValue: 0, retailValue: 0 }
 );
 
+const reportManagementRows: Array<Array<string | number>> = managementOverviewReport
+  ? [
+      ['Profitability', 'Gross Profit — This Month', formatPeso(managementOverviewReport.profitability.month.grossProfit), 'Net merchandise sales minus COGS'],
+      ['Profitability', 'Service / Delivery Revenue — This Month', formatPeso(managementOverviewReport.profitability.month.serviceDeliveryRevenue), 'Fees kept separate from merchandise gross profit'],
+      ['Profitability', 'Operating Expenses — This Month', formatPeso(managementOverviewReport.profitability.month.operatingExpenses), `${managementOverviewReport.profitability.month.expenseCount} active expense record(s)`],
+      ['Profitability', 'Estimated Net Profit — This Month', formatPeso(managementOverviewReport.profitability.month.estimatedNetProfit), 'Gross Profit + Service/Delivery Revenue − Operating Expenses'],
+      ['Purchasing', 'Open Purchase Orders', managementOverviewReport.purchasing.openPurchaseOrders, `${managementOverviewReport.purchasing.outstandingUnits} unit(s) outstanding`],
+      ['Purchasing', 'Outstanding Expected Purchase Cost', formatPeso(managementOverviewReport.purchasing.outstandingExpectedCost), 'Expected cost of remaining units on open POs'],
+      ['Replenishment', 'Products Needing Reorder', managementOverviewReport.replenishment.needsReorder, `${managementOverviewReport.replenishment.suggestedUnits} total suggested unit(s)`],
+      ['Replenishment', 'Covered by Open PO', managementOverviewReport.replenishment.coveredByOpenPo, 'Current need already covered by incoming PO quantities'],
+      ['Replenishment', 'Reorder Setup Required', managementOverviewReport.replenishment.setupRequired, 'Supplier/lead-time data requires completion'],
+      ['Returns & Voids', 'Adjustments Today', managementOverviewReport.saleAdjustmentsToday.adjustmentCount, `${managementOverviewReport.saleAdjustmentsToday.returnCount} return(s) · ${managementOverviewReport.saleAdjustmentsToday.voidCount} void(s)`],
+      ['Returns & Voids', 'Refunds Recorded Today', formatPeso(managementOverviewReport.saleAdjustmentsToday.refundAmount), 'Verified recorded refunds; PayMongo refunds remain external/manual'],
+      ['Cash Control', 'Cashier Shift', managementOverviewReport.cashier.hasOpenShift ? `Open #${managementOverviewReport.cashier.currentShift?.shiftId}` : 'No open shift', managementOverviewReport.cashier.currentShift
+        ? `${formatPeso(managementOverviewReport.cashier.currentShift.expectedCash)} expected cash`
+        : managementOverviewReport.cashier.lastClosedShift
+          ? `Last closed #${managementOverviewReport.cashier.lastClosedShift.shiftId}; discrepancy ${formatPeso(managementOverviewReport.cashier.lastClosedShift.discrepancy)}`
+          : 'No shift history yet'],
+    ]
+  : [];
+
 const reportTitle =
-  reportType === 'sales'
-    ? 'Sales Report'
+  reportType === 'management'
+    ? 'Management Summary'
+    : reportType === 'sales'
+      ? 'Sales Report'
     : reportType === 'inventory'
       ? 'Inventory Report'
       : reportType === 'lowStock'
@@ -4562,19 +6285,27 @@ const reportTitle =
         : 'Stock Movement Report';
 
 const reportTableHeaders =
-  reportType === 'sales'
-    ? [
+  reportType === 'management'
+    ? ['Area', 'Metric', 'Value', 'Interpretation']
+    : reportType === 'sales'
+      ? [
   'Date',
   'Reference',
   'Products / Items',
   'Source',
   'Items',
   'Quantity',
-  'Revenue',
-  'Cost',
+  'Gross Merchandise',
+  'Discount',
+  'Returns / Refunds',
+  'Net Merchandise Sales',
+  'Service / Delivery Revenue',
+  'Total Revenue',
+  'COGS',
   'Gross Profit',
+  'Gross Margin',
   'Payment Method',
-  'Status',
+  'Sale State',
 ]
     : reportType === 'inventory'
       ? [
@@ -4582,8 +6313,10 @@ const reportTableHeaders =
           'Category',
           'Supplier(s)',
           'Current Stock',
-          'Price',
-          'Stock Value',
+          'Average Cost',
+          'Inventory Cost Value',
+          'Selling Price',
+          'Potential Retail Value',
         ]
       : reportType === 'lowStock'
         ? [
@@ -4603,27 +6336,36 @@ const reportTableHeaders =
             'Supplier',
             'Cost / Unit',
             'Selling Price',
-            'Reference',
+            'System Reference',
+            'Supplier Reference',
             'Remarks',
             'Recorded By',
           ];
 
 const reportTableRows: Array<Array<string | number>> =
-  reportType === 'sales'
-  ? reportSalesRows.map((sale) => [
+  reportType === 'management'
+    ? reportManagementRows
+    : reportType === 'sales'
+      ? reportSalesRows.map((sale) => [
       new Date(sale.sale_date).toLocaleString('en-PH'),
       sale.reference,
       sale.items_summary || '—',
       sale.source_label,
       sale.item_count,
-      sale.total_quantity,
-      formatPeso(sale.revenue),
+      sale.net_quantity ?? sale.total_quantity,
+      formatPeso(sale.gross_merchandise_sales),
+      formatPeso(sale.discount_amount),
+      formatPeso(sale.total_refunds),
+      formatPeso(sale.net_merchandise_sales),
+      formatPeso(sale.fee_revenue),
+      formatPeso(sale.total_revenue),
       formatPeso(sale.cogs),
       formatPeso(sale.gross_profit),
+      `${Number(sale.gross_profit_margin || 0).toFixed(2)}%`,
       formatPaymentMethod(
         sale.payment_method || 'cash'
       ),
-      sale.payment_status,
+      sale.adjustment_state || 'Completed',
     ])
     : reportType === 'inventory'
       ? reportInventoryRows.map((product) => [
@@ -4631,6 +6373,8 @@ const reportTableRows: Array<Array<string | number>> =
           product.category,
           getProductSupplierDisplay(product),
           product.stock,
+          formatPeso(getAverageInventoryCost(product)),
+          formatPeso(getInventoryCostValue(product)),
           formatPeso(product.price),
           formatPeso(
             Number(product.stock) *
@@ -4689,11 +6433,69 @@ const reportTableRows: Array<Array<string | number>> =
 
               reference,
 
+              movement.supplier_reference || '—',
+
               movement.remarks || '—',
 
               movement.recorded_by || '—',
             ];
           });
+
+const compactReportHeaders =
+  reportType === 'management'
+    ? reportTableHeaders
+    : reportType === 'sales'
+      ? ['Date / Reference', 'Products / Items', 'Source', 'Qty', 'Net Merchandise', 'Total Revenue', 'Gross Profit / Margin', 'State']
+      : reportType === 'inventory'
+        ? ['Product / Category', 'Supplier(s)', 'Stock', 'Average Cost', 'Inventory Cost Value', 'Retail Value']
+        : reportType === 'lowStock'
+          ? reportTableHeaders
+          : ['Date / Reference', 'Product', 'Movement', 'Source', 'Supplier', 'Cost / Unit', 'Recorded By'];
+
+const compactReportRows: Array<Array<string | number>> =
+  reportType === 'management'
+    ? reportManagementRows
+    : reportType === 'sales'
+      ? reportSalesRows.map((sale) => [
+          `${new Date(sale.sale_date).toLocaleDateString('en-PH')} · ${sale.reference}`,
+          sale.items_summary || '—',
+          sale.source_label,
+          sale.net_quantity ?? sale.total_quantity,
+          formatPeso(sale.net_merchandise_sales),
+          formatPeso(sale.total_revenue),
+          `${formatPeso(sale.gross_profit)} · ${Number(sale.gross_profit_margin || 0).toFixed(2)}%`,
+          sale.adjustment_state || 'Completed',
+        ])
+      : reportType === 'inventory'
+        ? reportInventoryRows.map((product) => [
+            `${product.name} · ${product.category}`,
+            getProductSupplierDisplay(product),
+            product.stock,
+            formatPeso(getAverageInventoryCost(product)),
+            formatPeso(getInventoryCostValue(product)),
+            formatPeso(Number(product.stock) * Number(product.price)),
+          ])
+        : reportType === 'lowStock'
+          ? reportLowStockRows.map((product) => [
+              product.name,
+              product.category,
+              getProductSupplierDisplay(product),
+              product.stock,
+              getProductReorderLevel(product),
+              product.stock === 0 ? 'Out of Stock' : 'Below Reorder Level',
+            ])
+          : reportStockMovementRows.map((movement) => [
+              `${new Date(movement.movement_date).toLocaleDateString('en-PH')} · ${movement.reference_label || movement.order_id || (movement.sale_id ? `Sale #${movement.sale_id}` : '—')}`,
+              movement.product_name,
+              `${movement.movement_type === 'Stock-In' ? '+' : '-'}${movement.quantity} ${movement.movement_type}`,
+              movement.source_label || movement.remarks || (movement.movement_type === 'Stock-In' ? 'Stock Receiving' : 'Sale'),
+              movement.supplier_name || '—',
+              formatPeso(Number(movement.supplier_price || 0)),
+              movement.recorded_by || '—',
+            ]);
+
+const reportScreenHeaders = reportTableView === 'full' ? reportTableHeaders : compactReportHeaders;
+const reportScreenRows = reportTableView === 'full' ? reportTableRows : compactReportRows;
 
 const handleExportReportCsv = () => {
   const reportRows = [reportTableHeaders, ...reportTableRows];
@@ -4752,7 +6554,7 @@ const handlePrintReport = () => {
           tr:nth-child(even) td { background: #f8faf9; }
           .empty { padding: 28px; text-align: center; color: #61766d; }
           @page {
-  size: ${reportType === 'stockMovement'
+  size: ${reportType === 'stockMovement' || reportType === 'sales'
     ? 'landscape'
     : 'portrait'};
   margin: 16mm;
@@ -4828,7 +6630,7 @@ const customersWithOrdersCount = customers.filter(
 ).length;
 
 return (
-<div className="relative min-h-screen w-full bg-[#F4F7F5] pt-16 text-[#34463F] lg:h-screen lg:overflow-hidden">
+<div className="relative min-h-screen w-full bg-[radial-gradient(circle_at_82%_0%,rgba(220,244,229,0.55),transparent_30%),linear-gradient(180deg,#F6F9F7_0%,#F1F6F3_100%)] pt-16 text-[#34463F] lg:h-screen lg:overflow-hidden">
       {/* Mobile backdrop */}
       {isSidebarOpen && (
         <button
@@ -4839,235 +6641,16 @@ return (
         />
       )}
 
-      {/* Fixed desktop sidebar and slide-out mobile sidebar */}
-<aside
-  id="admin-sidebar-navigation"
-  className={`fixed bottom-0 left-0 top-16 z-40 w-72
-    transform overflow-y-auto overflow-x-hidden overscroll-contain
-    border-r border-[#dfe9e2]
-    bg-white text-[#17372d]
-    shadow-[8px_0_30px_-24px_rgba(11,59,35,0.30)]
-    transition-[width,transform] duration-300 ease-out
-    lg:translate-x-0
-    ${
-      isSidebarOpen
-        ? 'translate-x-0'
-        : '-translate-x-full'
-    }
-    ${
-      isSidebarCollapsed
-        ? 'lg:w-20 lg:px-3'
-        : 'lg:w-72 lg:px-4'
-    }
-    py-4`}
->
-  <div
-  className={`flex min-h-[42px] items-center border-b border-[#e3ece6] pb-3 ${
-    isSidebarCollapsed
-      ? 'justify-center'
-      : 'justify-between'
-  }`}
->
-  {!isSidebarCollapsed && (
-    <p
-      className="
-        text-[10px]
-        font-bold
-        uppercase
-        tracking-[0.18em]
-        text-[#789086]
-      "
-    >
-      Administration Menu
-    </p>
-  )}
-
-  <button
-    type="button"
-    onClick={() =>
-      setIsSidebarCollapsed((current) => !current)
-    }
-    className="
-      hidden h-8 w-8 shrink-0 items-center justify-center
-      rounded-lg
-      border border-[#d8e6dd]
-      bg-white
-      text-[#15803d]
-      shadow-sm
-      transition-all duration-200
-      hover:border-emerald-200
-      hover:bg-emerald-50
-      lg:flex
-    "
-    aria-label={
-      isSidebarCollapsed
-        ? 'Expand administration sidebar'
-        : 'Collapse administration sidebar'
-    }
-    title={
-      isSidebarCollapsed
-        ? 'Expand sidebar'
-        : 'Collapse sidebar'
-    }
-  >
-    <Menu className="h-4 w-4" />
-  </button>
-</div>
-
-        <nav
-  className="mt-5 space-y-1.5"
-  aria-label="Administration sections"
-  onClick={() => setIsSidebarOpen(false)}
->
-          <p className={adminSectionLabelClass}>
-            Dashboard
-          </p>
-          <button
-  onClick={() => setActiveTab('overview')}
-  className={adminNavClass('overview')}
-  title="Dashboard Overview"
->
-  <LayoutDashboard className="h-4 w-4 shrink-0" />
-
-  <span className={adminNavLabelClass}>
-    Dashboard Overview
-  </span>
-</button>
-
-          <p className={adminSectionLabelClass}>
-            Orders &amp; Delivery
-          </p>
-          <button
-  onClick={() => setActiveTab('orders')}
-  className={adminNavClass('orders')}
-  title="Manage Orders"
->
-  <ClipboardList className="h-4 w-4 shrink-0" />
-
-  <span className={adminNavLabelClass}>
-    Manage Orders
-  </span>
-
-  {(pendingCount + processingCount) > 0 && (
-    <span
-      className={`ml-auto rounded-full bg-[#15803d] px-2 py-0.5
-        text-[10px] font-bold text-white
-        ${isSidebarCollapsed ? 'lg:hidden' : ''}`}
-    >
-      {pendingCount + processingCount}
-    </span>
-  )}
-</button>
-
-<button
-  onClick={() => setActiveTab('deliveryRates')}
-  className={adminNavClass('deliveryRates')}
-  title="Delivery Rates"
->
-  <MapPin className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Delivery Rates
-  </span>
-</button>
-
-<p className={adminSectionLabelClass}>
-  Inventory
-</p>
-
-<button
-  onClick={() => setActiveTab('products')}
-  className={adminNavClass('products')}
-  title="Product Inventory"
->
-  <Package className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Product Inventory
-  </span>
-</button>
-
-<button
-  onClick={() => setActiveTab('receiveStock')}
-  className={adminNavClass('receiveStock')}
-  title="Receive Stock"
->
-  <ArrowLeftRight className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Receive Stock
-  </span>
-</button>
-
-<button
-  onClick={() => setActiveTab('categories')}
-  className={adminNavClass('categories')}
-  title="Category Management"
->
-  <Package className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Category Management
-  </span>
-</button>
-
-<button
-  onClick={() => setActiveTab('suppliers')}
-  className={adminNavClass('suppliers')}
-  title="Supplier Management"
->
-  <Package className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Supplier Management
-  </span>
-</button>
-
-<p className={adminSectionLabelClass}>
-  Sales &amp; Reports
-</p>
-
-<button
-  onClick={() => setActiveTab('pos')}
-  className={adminNavClass('pos')}
-  title="POS / New Sale"
->
-  <ScanBarcode className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    POS / New Sale
-  </span>
-</button>
-
-<button
-  onClick={() => setActiveTab('sales')}
-  className={adminNavClass('sales')}
-  title="Sales History"
->
-  <TrendingUp className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Sales History
-  </span>
-</button>
-          
-<button
-  onClick={() => setActiveTab('movementHistory')}
-  className={adminNavClass('movementHistory')}
-  title="Inventory Movements"
->
-  <ArrowLeftRight className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Inventory Movements
-  </span>
-</button>
-
-<button
-  onClick={() => setActiveTab('reports')}
-  className={adminNavClass('reports')}
-  title="Reports Center"
->
-  <FileBarChart className="h-4 w-4 shrink-0" />
-  <span className={adminNavLabelClass}>
-    Reports Center
-  </span>
-</button>
-
-        </nav>
-      </aside>
+      {/* Grouped, collapsible Admin navigation. Existing tab URLs remain unchanged. */}
+      <AdminSidebar
+        activeTab={activeTab}
+        isOpen={isSidebarOpen}
+        isCollapsed={isSidebarCollapsed}
+        activeOrderCount={pendingCount + processingCount}
+        onNavigate={(tab: AdminSidebarTab) => setActiveTab(tab as AdminTab)}
+        onClose={() => setIsSidebarOpen(false)}
+        onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}
+      />
 
 {/* Main Panel Content */}
 <main
@@ -5084,10 +6667,11 @@ return (
     xl:px-8
     ${
       isSidebarCollapsed
-        ? 'lg:ml-20 lg:w-[calc(100%-5rem)]'
+        ? 'lg:ml-[5.25rem] lg:w-[calc(100%-5.25rem)]'
         : 'lg:ml-72 lg:w-[calc(100%-18rem)]'
     }`}
 >
+        <div className="min-h-[calc(100vh-5rem)]">
         {/* Mobile administration menu button */}
         <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#DDE6E0] bg-white p-3 shadow-sm lg:hidden">
           <div>
@@ -5117,295 +6701,22 @@ return (
 
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
-          <div className="space-y-5 animate-fade-up">
-            {/* Legendary fleet banner. The text remains HTML so it stays crisp,
-                accessible, and separate from the truck photograph. */}
-            <section
-              className="relative min-h-[240px] overflow-hidden rounded-3xl border border-[#285845] bg-[#0B3B23] bg-cover bg-center text-white shadow-lg shadow-[#12372A]/15"
-              style={{
-                backgroundImage:
-                  "linear-gradient(90deg, rgba(5, 47, 27, 0.98) 0%, rgba(5, 63, 34, 0.88) 34%, rgba(5, 63, 34, 0.38) 55%, rgba(5, 47, 27, 0.08) 100%), url('/images/rayjin-legendary-trucks-banner.png')",
-              }}
-            >
-              <div className="relative z-10 flex min-h-[240px] max-w-lg flex-col justify-center p-6 md:p-8">
-                <span className="mb-3 inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-black/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#8BE5B4] backdrop-blur-sm">
-                  <Shield className="h-3.5 w-3.5" />
-                  Rayjin Hardware Operations
-                </span>
-
-                <h2 className="font-display text-2xl font-bold leading-tight text-white md:text-3xl">
-                  Welcome back, {user.first_name || user.username}!
-                </h2>
-
-                <p className="mt-2 max-w-md text-sm leading-relaxed text-[#D9EDE2]">
-                  Monitor orders, sales, delivery rates, and inventory activity
-                  from one clear administrative overview.
-                </p>
-
-                <div className="mt-5 flex items-center gap-2 border-t border-white/15 pt-4 text-xs text-white/75">
-                  <CheckCircle className="h-4 w-4 text-[#6FE0A2]" />
-                  <span>The five legendary company trucks</span>
-                </div>
-              </div>
-            </section>
-
-            {/* Live KPI statistics */}
-            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Business summary">
-              <article className="group rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#E4F5EA] text-[#0D7740]">
-                    <TrendingUp className="h-5 w-5" />
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A9991]">Sales</span>
-                </div>
-                <span className="text-xs font-semibold text-[#71817A]">Total Revenue</span>
-                <h3 className="mt-1 font-display text-2xl font-bold text-[#17372D]">
-                  ₱{Number(salesSummary.total_revenue).toLocaleString('en-PH', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </h3>
-                <p className="mt-1 text-[10px] text-[#71817A]">Recorded paid sales</p>
-              </article>
-
-              <article className="group rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FFF4D9] text-[#D98608]">
-                    <Clock className="h-5 w-5" />
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A9991]">Orders</span>
-                </div>
-                <span className="text-xs font-semibold text-[#71817A]">Pending Orders</span>
-                <h3 className="mt-1 font-display text-2xl font-bold text-[#17372D]">
-                  {dashboardPendingCount}
-                </h3>
-                <p className="mt-1 text-[10px] text-[#D98608]">Awaiting admin action</p>
-              </article>
-
-              <article className="group rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FDE8E8] text-[#D63C42]">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A9991]">Inventory</span>
-                </div>
-                <span className="text-xs font-semibold text-[#71817A]">Low Stock Items</span>
-                <h3 className="mt-1 font-display text-2xl font-bold text-[#17372D]">
-                  {lowStockProducts.length} items
-                </h3>
-                <p className="mt-1 text-[10px] text-[#D63C42]">Needs restocking</p>
-              </article>
-
-              <article className="group rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#E4F5EA] text-[#0D7740]">
-                    <ShoppingCart className="h-5 w-5" />
-                  </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A9991]">Fulfillment</span>
-                </div>
-                <span className="text-xs font-semibold text-[#71817A]">Completed Orders</span>
-                <h3 className="mt-1 font-display text-2xl font-bold text-[#17372D]">
-                  {completedOrderCount} orders
-                </h3>
-                <p className="mt-1 text-[10px] text-[#0D7740]">Successfully fulfilled</p>
-              </article>
-            </section>
-
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(250px,0.72fr)_minmax(260px,0.8fr)]">
-              {/* Seven-day sales chart */}
-              <article className="rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm">
-                <div className="mb-5 flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="font-display text-sm font-bold text-[#17372D]">Sales Overview</h3>
-                    <p className="mt-1 text-[10px] text-[#71817A]">Paid revenue during the last seven days</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('sales')}
-                    className="text-[10px] font-bold text-[#0D7740] hover:underline"
-                  >
-                    View sales history
-                  </button>
-                </div>
-
-                {dashboardSalesDays.every((day) => day.revenue === 0) ? (
-                  <div className="flex h-44 items-center justify-center rounded-xl bg-[#F7FAF8] text-xs text-[#71817A]">
-                    No paid sales recorded during the last seven days.
-                  </div>
-                ) : (
-                  <div className="flex h-44 items-end gap-2 border-b border-[#DDE6E0] px-2 pt-3">
-                    {dashboardSalesDays.map((day) => (
-                      <div key={day.label} className="flex h-full min-w-0 flex-1 flex-col justify-end gap-2 text-center">
-                        <span className="truncate text-[9px] font-semibold text-[#71817A]">
-                          {day.revenue > 0 ? `₱${day.revenue.toFixed(0)}` : '—'}
-                        </span>
-                        <div
-                          className="mx-auto w-full max-w-9 rounded-t-md bg-gradient-to-t from-[#0D7740] to-[#32B56F]"
-                          style={{
-                            height: `${Math.max(
-                              (day.revenue / dashboardMaximumRevenue) * 100,
-                              day.revenue ? 8 : 2
-                            )}%`,
-                          }}
-                          title={`${day.label}: ₱${day.revenue.toFixed(2)}`}
-                        />
-                        <span className="pb-2 text-[9px] font-semibold text-[#71817A]">{day.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-
-              {/* Order status composition */}
-              <article className="rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm">
-                <h3 className="font-display text-sm font-bold text-[#17372D]">Order Status</h3>
-                <p className="mt-1 text-[10px] text-[#71817A]">Current fulfillment distribution</p>
-
-                <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row xl:flex-col">
-                  <div
-                    className="relative h-28 w-28 shrink-0 rounded-full"
-                    style={{ background: dashboardStatusGradient }}
-                    role="img"
-                    aria-label={`${orders.length} total orders`}
-                  >
-                    <div className="absolute inset-5 flex flex-col items-center justify-center rounded-full bg-white">
-                      <strong className="text-xl font-bold text-[#17372D]">{orders.length}</strong>
-                      <span className="text-[9px] text-[#71817A]">Total orders</span>
-                    </div>
-                  </div>
-
-                  <div className="grid w-full gap-2 text-[10px]">
-                    <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-[#52635B]"><span className="h-2 w-2 rounded-full bg-[#15944F]" />Completed</span><strong>{completedOrderCount}</strong></div>
-                    <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-[#52635B]"><span className="h-2 w-2 rounded-full bg-[#F59E0B]" />Pending</span><strong>{dashboardPendingCount}</strong></div>
-                    <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-[#52635B]"><span className="h-2 w-2 rounded-full bg-[#3B82F6]" />In progress</span><strong>{dashboardProcessingCount}</strong></div>
-                    <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-[#52635B]"><span className="h-2 w-2 rounded-full bg-[#DC2626]" />Cancelled</span><strong>{dashboardCancelledCount}</strong></div>
-                  </div>
-                </div>
-              </article>
-
-              {/* Quick navigation actions */}
-              <article className="rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm">
-                <h3 className="font-display text-sm font-bold text-[#17372D]">Quick Actions</h3>
-                <p className="mt-1 text-[10px] text-[#71817A]">Open common administrative tasks</p>
-
-                <div className="mt-5 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('products')}
-                    className="flex min-h-20 flex-col items-start justify-center rounded-xl bg-[#0D7740] p-3 text-left text-white transition-colors hover:bg-[#0A6135]"
-                  >
-                    <Package className="mb-2 h-5 w-5" />
-                    <strong className="text-xs">Add Product</strong>
-                    <span className="mt-0.5 text-[9px] text-white/70">Create an item</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('pos')}
-                    className="flex min-h-20 flex-col items-start justify-center rounded-xl bg-[#EAF6EF] p-3 text-left text-[#0D6337] transition-colors hover:bg-[#DCEFE4]"
-                  >
-                    <ScanBarcode className="mb-2 h-5 w-5" />
-                    <strong className="text-xs">New POS Sale</strong>
-                    <span className="mt-0.5 text-[9px] text-[#557466]">Start transaction</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('receiveStock')}
-                    className="flex min-h-20 flex-col items-start justify-center rounded-xl bg-[#EAF6EF] p-3 text-left text-[#0D6337] transition-colors hover:bg-[#DCEFE4]"
-                  >
-                    <ArrowLeftRight className="mb-2 h-5 w-5" />
-                    <strong className="text-xs">Receive Stock</strong>
-                    <span className="mt-0.5 text-[9px] text-[#557466]">Update inventory</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('orders')}
-                    className="flex min-h-20 flex-col items-start justify-center rounded-xl bg-[#EAF6EF] p-3 text-left text-[#0D6337] transition-colors hover:bg-[#DCEFE4]"
-                  >
-                    <ClipboardList className="mb-2 h-5 w-5" />
-                    <strong className="text-xs">View Orders</strong>
-                    <span className="mt-0.5 text-[9px] text-[#557466]">Open order queue</span>
-                  </button>
-                </div>
-              </article>
-            </section>
-
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.8fr)]">
-              {/* Recent orders */}
-              <article className="overflow-hidden rounded-2xl border border-[#DDE6E0] bg-white shadow-sm">
-                <div className="flex items-start justify-between gap-4 border-b border-[#E5ECE8] p-5">
-                  <div>
-                    <h3 className="font-display text-sm font-bold text-[#17372D]">Recent Orders</h3>
-                    <p className="mt-1 text-[10px] text-[#71817A]">Latest customer orders and fulfillment status</p>
-                  </div>
-                  <button type="button" onClick={() => setActiveTab('orders')} className="text-[10px] font-bold text-[#0D7740] hover:underline">View all orders</button>
-                </div>
-
-                {recentDashboardOrders.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-[#71817A]">No orders have been recorded.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-left text-xs">
-                      <thead className="bg-[#F7FAF8] text-[9px] uppercase tracking-wider text-[#71817A]">
-                        <tr><th className="px-5 py-3">Order ID</th><th className="px-4 py-3">Customer</th><th className="px-4 py-3">Items</th><th className="px-4 py-3">Status</th><th className="px-5 py-3 text-right">Total</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#E5ECE8]">
-                        {recentDashboardOrders.map((order) => (
-                          <tr key={order.id} className="text-[#405149] hover:bg-[#F9FBFA]">
-                            <td className="whitespace-nowrap px-5 py-3 font-bold text-[#17372D]">{order.id}</td>
-                            <td className="px-4 py-3">{[order.customer_first_name, order.customer_last_name].filter(Boolean).join(' ') || 'Customer'}</td>
-                            <td className="px-4 py-3">{order.items.reduce((total, item) => total + item.quantity, 0)}</td>
-                            <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-bold capitalize ${order.status === 'completed' || order.status === 'ready' ? 'bg-[#E4F5EA] text-[#0D7740]' : order.status === 'cancelled' || order.status === 'rejected' ? 'bg-[#FDE8E8] text-[#C7353B]' : 'bg-[#FFF4D9] text-[#C97800]'}`}>{order.status.split('_').join(' ')}</span></td>
-                            <td className="whitespace-nowrap px-5 py-3 text-right font-bold text-[#17372D]">₱{Number(order.total).toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </article>
-
-              {/* Low-stock summary */}
-              <article className="overflow-hidden rounded-2xl border border-[#DDE6E0] bg-white shadow-sm">
-                <div className="flex items-start justify-between gap-4 border-b border-[#E5ECE8] p-5">
-                  <div>
-                    <h3 className="font-display text-sm font-bold text-[#17372D]">Low Stock Items</h3>
-                    <p className="mt-1 text-[10px] text-[#71817A]">Products that may need restocking</p>
-                  </div>
-                  <button
-  type="button"
-  onClick={() => {
-    setReportType('lowStock');
-    setActiveTab('reports');
-  }}
-  className="text-[10px] font-bold text-[#0D7740] hover:underline"
->
-  View low-stock report
-</button>
-                </div>
-
-                {lowStockProducts.length === 0 ? (
-                  <div className="flex items-center justify-center gap-2 p-8 text-xs text-[#0D7740]"><CheckCircle className="h-4 w-4" />All products have sufficient stock.</div>
-                ) : (
-                  <div className="divide-y divide-[#E5ECE8]">
-                    {lowStockProducts.slice(0, 5).map((product) => (
-                      <div key={product.id} className="flex items-center justify-between gap-4 px-5 py-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-bold text-[#17372D]">{product.name}</p>
-                          <p className="mt-0.5 text-[9px] text-[#71817A]">{product.category}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <span className="inline-flex rounded-full bg-[#FDE8E8] px-2 py-1 text-[9px] font-bold text-[#C7353B]">{product.stock} left</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-            </section>
-          </div>
+          <AdminDashboardOverview
+            userName={user.first_name || user.username}
+            totalRevenue={Number(salesSummary.total_revenue || 0)}
+            pendingOrders={dashboardPendingCount}
+            activeFulfillment={dashboardProcessingCount}
+            completedOrders={completedOrderCount}
+            cancelledOrders={dashboardCancelledCount}
+            orders={orders}
+            lowStockProducts={lowStockProducts}
+            salesDays={dashboardSalesDays}
+            onNavigate={(tab) => setActiveTab(tab as AdminTab)}
+            onOpenLowStockReport={() => {
+              setReportType('lowStock');
+              setActiveTab('reports');
+            }}
+          />
         )}
 
 {/* CUSTOMER MANAGEMENT */}
@@ -5773,130 +7084,481 @@ return (
   </div>
 )}
 
+{/* CUSTOMER MESSAGES */}
+{activeTab === 'messages' && (
+  <AdminMessages
+    onOpenOrder={(orderId) => {
+      setOrderSearch(orderId);
+      setOrderDateFilter('');
+      setOrderStatusFilter('all');
+      setActiveTab('orders');
+    }}
+  />
+)}
+
 {/* TAB 2: ORDER MANAGER */}
 {activeTab === 'orders' && (
   <div className="space-y-5 animate-fade-up">
 
-    <div>
-      <h2 className="text-2xl font-bold font-display text-steel-950">
-        Fulfillment Center
-      </h2>
+    <section className="rounded-2xl border border-[#DDE6E0] bg-white px-5 py-4 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">
+            Online Order Operations
+          </p>
+          <h2 className="mt-1 font-display text-xl font-extrabold text-[#17372D]">
+            Fulfillment Center
+          </h2>
+          <p className="mt-1 text-xs text-[#71817A]">
+            Review and progress Pickup, Delivery, and Shop &amp; Go orders without changing the existing fulfillment workflow.
+          </p>
+        </div>
 
-      <p className="text-sm text-steel-500">
-        Process online customer orders and update dispatch status.
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[10px] font-bold text-amber-700">
+            Active {dashboardPendingCount + dashboardProcessingCount}
+          </span>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-700">
+            Completed {completedOrderCount}
+          </span>
+          <span className="rounded-full border border-steel-200 bg-steel-50 px-3 py-1.5 text-[10px] font-bold text-steel-600">
+            Closed {dashboardCancelledCount}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => void fetchOrders()}
+            className="inline-flex items-center gap-2 rounded-xl bg-[#15803d] px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#166534] active:scale-[0.98]"
+            title="Reload current order data"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </button>
+        </div>
+      </div>
+    </section>
+
+    {orders.length > 0 && (
+  <div className="rounded-2xl border border-[#DDE6E0] bg-white p-4 shadow-sm">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.2fr)_minmax(180px,0.7fr)_minmax(200px,0.8fr)_auto]">
+
+      {/* ORDER ID SEARCH */}
+      <label className="block">
+        <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#71817A]">
+          Search Order ID
+        </span>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#829089]" />
+
+          <input
+            type="search"
+            value={orderSearch}
+            onChange={(event) =>
+              setOrderSearch(event.target.value)
+            }
+            placeholder="e.g. ORD-123..."
+            className="w-full rounded-xl border border-[#DDE6E0] bg-[#F9FBFA] py-2.5 pl-9 pr-3 text-xs text-[#34463F] outline-none transition focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/10"
+          />
+        </div>
+      </label>
+
+      {/* ORDER DATE */}
+      <label className="block">
+        <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#71817A]">
+          Order Date
+        </span>
+
+        <div className="relative">
+          <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#829089]" />
+
+          <input
+            type="date"
+            value={orderDateFilter}
+            onChange={(event) =>
+              setOrderDateFilter(event.target.value)
+            }
+            className="w-full rounded-xl border border-[#DDE6E0] bg-[#F9FBFA] py-2.5 pl-9 pr-3 text-xs text-[#34463F] outline-none transition focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/10"
+          />
+        </div>
+      </label>
+
+      {/* ORDER STATUS */}
+      <label className="block">
+        <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-[#71817A]">
+          Order Status
+        </span>
+
+        <select
+          value={orderStatusFilter}
+          onChange={(event) =>
+            setOrderStatusFilter(
+              event.target.value as
+                | 'all'
+                | Order['status']
+            )
+          }
+          className="w-full rounded-xl border border-[#DDE6E0] bg-[#F9FBFA] px-3 py-2.5 text-xs font-semibold text-[#34463F] outline-none transition focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/10"
+        >
+          <option value="all">
+            All Statuses
+          </option>
+
+          <option value="pending">
+            Pending
+          </option>
+
+          <option value="awaiting_payment">
+            Awaiting Payment
+          </option>
+
+          <option value="approved">
+            Approved
+          </option>
+
+          <option value="processing">
+            Processing
+          </option>
+
+          <option value="ready">
+            Ready for Pickup
+          </option>
+
+          <option value="out_for_delivery">
+            Out for Delivery
+          </option>
+
+          <option value="failed_delivery">
+            Failed Delivery
+          </option>
+
+          <option value="deactivated">
+            Temporarily Deactivated
+          </option>
+
+          <option value="completed">
+            Completed
+          </option>
+
+          <option value="cancelled">
+            Cancelled
+          </option>
+
+          <option value="rejected">
+            Rejected
+          </option>
+        </select>
+      </label>
+
+      {/* CLEAR FILTERS */}
+      <div className="flex items-end">
+        <button
+          type="button"
+          onClick={clearOrderFilters}
+          disabled={!hasActiveOrderFilters}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#DDE6E0] bg-white px-4 py-2.5 text-xs font-bold text-[#52635B] transition hover:border-[#2F7D5A] hover:bg-[#F1F8F4] hover:text-[#2F7D5A] disabled:cursor-not-allowed disabled:opacity-40 xl:w-auto"
+        >
+          <X className="h-4 w-4" />
+          Clear Filters
+        </button>
+      </div>
+    </div>
+
+    <div className="mt-3 border-t border-[#E5ECE8] pt-3">
+      <p className="text-[10px] font-medium text-[#71817A]">
+        Showing{' '}
+        <span className="font-bold text-[#2F7D5A]">
+          {filteredOrders.length}
+        </span>{' '}
+        of {orders.length} orders
       </p>
     </div>
+  </div>
+)}
 
     {orders.length === 0 ? (
 
-      <div className="text-center py-12 bg-white border border-steel-200/60 rounded-2xl text-steel-500">
-        <p className="text-xs">
-          No orders logged in store database.
-        </p>
-      </div>
+  <div className="text-center py-12 bg-white border border-steel-200/60 rounded-2xl text-steel-500">
+    <p className="text-xs">
+      No orders logged in store database.
+    </p>
+  </div>
 
-    ) : (
+) : filteredOrders.length === 0 ? (
 
-      <div className="space-y-4">
+  <div className="rounded-2xl border border-[#DDE6E0] bg-white p-10 text-center shadow-sm">
+    <Search className="mx-auto h-7 w-7 text-[#9AABA2]" />
 
-        {sortedOrders.map((order) => (
+    <h3 className="mt-3 text-sm font-bold text-[#17372D]">
+      No matching orders
+    </h3>
+
+    <p className="mt-1 text-xs text-[#71817A]">
+      No orders match the selected search or filters.
+    </p>
+
+    <button
+      type="button"
+      onClick={clearOrderFilters}
+      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#256548]"
+    >
+      <X className="h-4 w-4" />
+      Clear Filters
+    </button>
+  </div>
+
+) : (
+
+  <div className="space-y-4">
+
+    {filteredOrders.map((order, index) => {
+      const group =
+        getAdminOrderGroup(order);
+
+      const previousGroup =
+        index > 0
+          ? getAdminOrderGroup(
+              filteredOrders[
+                index - 1
+              ]
+            )
+          : null;
+
+      const showGroupHeader =
+        group !== previousGroup;
+
+      const groupCount =
+        filteredOrders.filter(
+          (candidate) =>
+            getAdminOrderGroup(
+              candidate
+            ) === group
+        ).length;
+
+      return (
+        <React.Fragment key={order.id}>
+
+          {showGroupHeader && (
+            <div className="flex items-center justify-between gap-3 px-1 pt-1">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#52635B]">
+                  {getAdminOrderGroupLabel(
+                    group
+                  )}
+                </span>
+
+                <p className="mt-0.5 text-[10px] text-steel-400">
+                  {getAdminOrderGroupDescription(
+                    group
+                  )}
+                </p>
+              </div>
+
+              <span className="rounded-full border border-[#DDE6E0] bg-white px-2.5 py-1 text-[9px] font-bold text-[#52635B]">
+                {groupCount}
+              </span>
+            </div>
+          )}
 
           <div
-            key={order.id}
-            className="bg-white border border-steel-200/60 rounded-2xl p-5 shadow-sm"
+            ref={(node) => {
+              orderCardRefs.current[
+                order.id
+              ] = node;
+            }}
+            className={`rounded-2xl border bg-white p-5 shadow-sm transition-all duration-500 ${
+              recentlyUpdatedOrderId ===
+              order.id
+                ? 'border-emerald-400 ring-2 ring-emerald-200/70'
+                : 'border-steel-200/60'
+            }`}
           >
 
-            {/* ORDER HEADER */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-steel-100 pb-4 mb-4">
+            {/* ORDER SUMMARY + COMPACT WORKFLOW TRACKER */}
+            <div className="mb-4 rounded-xl border border-[#DDE6E0] bg-[#FBFDFC] p-4">
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 
-                <div>
-                  <span className="text-[10px] font-bold text-steel-400 block">
-                    ORDER ID
-                  </span>
+                <div className="flex flex-wrap items-center gap-4">
 
-                  <h4 className="text-sm font-bold text-steel-800">
-                    {order.id}
-                  </h4>
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                      Order ID
+                    </span>
+
+                    <h4 className="mt-0.5 text-sm font-bold text-steel-800">
+                      {order.id}
+                    </h4>
+                  </div>
+
+                  <div className="hidden h-7 w-px bg-steel-100 sm:block" />
+
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                      Fulfillment
+                    </span>
+
+                    <span className="mt-0.5 block text-xs font-bold text-steel-700">
+                      {order.fulfillment === 'shop_go'
+                        ? 'Shop & Go'
+                        : order.fulfillment === 'delivery'
+                          ? 'Delivery'
+                          : 'Pickup'}
+                    </span>
+                  </div>
+
+                  <div className="hidden h-7 w-px bg-steel-100 sm:block" />
+
+                  <div>
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                      Payment
+                    </span>
+
+                    <span className="mt-0.5 block text-xs font-bold uppercase text-steel-700">
+                      {formatPaymentMethod(
+                        order.payment_method ||
+                        order.paymentMethod ||
+                        'cash'
+                      )}
+                    </span>
+                  </div>
+
                 </div>
 
-                <div className="h-6 w-px bg-steel-100"></div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
 
-                <div>
-                  <span className="text-[10px] font-bold text-steel-400 block">FULFILLMENT</span>
-                  <span className="text-xs font-bold text-steel-700">
-                    {order.fulfillment === 'shop_go'
-                      ? 'Shop & Go'
-                      : order.fulfillment === 'delivery'
-                        ? 'Delivery'
-                        : 'Pickup'}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handlePrintOrderSlip(
+                        order
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#DDE6E0] bg-white px-3 py-2 text-[10px] font-bold text-[#2F7D5A] transition hover:border-emerald-300 hover:bg-emerald-50"
+                    title="Print current order / fulfillment slip"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Print Order
+                  </button>
+
+                  {Number(order.discount_amount || 0) > 0 && (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">
+                      First Order -20%
+                    </span>
+                  )}
+
+                  <span className="text-sm font-bold text-steel-950">
+                    ₱{(
+                      Number(order.total) +
+                      Number(order.service_fee || 0) +
+                      Number(order.delivery_fee || 0)
+                    ).toFixed(2)}
                   </span>
-                </div>
 
-                <div className="h-6 w-px bg-steel-100"></div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-steel-400 block">
-                    PAYMENT
-                  </span>
-
-                  <span className="text-xs font-bold text-steel-700 uppercase">
-                    {formatPaymentMethod(
-                      order.payment_method ||
-                      order.paymentMethod ||
-                      'cash'
+                  <span
+                    className={`rounded px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider ${
+                      order.status === 'completed'
+                        ? 'border border-green-200 bg-green-50 text-green-700'
+                        : order.status === 'approved'
+                          ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : order.status === 'processing'
+                            ? 'border border-blue-200 bg-blue-50 text-blue-700'
+                            : order.status === 'ready'
+                              ? 'border border-teal-200 bg-teal-50 text-teal-700'
+                              : order.status === 'out_for_delivery'
+                                ? 'border border-indigo-200 bg-indigo-50 text-indigo-700'
+                                : order.status === 'failed_delivery'
+                                  ? 'border border-red-200 bg-red-50 text-red-700'
+                                  : order.status === 'deactivated'
+                                    ? 'border border-steel-200 bg-steel-100 text-steel-600'
+                                    : order.status === 'rejected'
+                                      ? 'border border-red-200 bg-red-50 text-red-700'
+                                      : order.status === 'cancelled'
+                                        ? 'border border-steel-200 bg-steel-100 text-steel-600'
+                                        : 'border border-yellow-200 bg-yellow-50 text-yellow-700'
+                    }`}
+                  >
+                    {getAdminOrderStatusLabel(
+                      order
                     )}
                   </span>
+
                 </div>
 
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="mt-3 border-t border-[#E5ECE8] pt-3">
 
-                <span className="text-sm font-bold text-steel-950">
-                  ₱{(
-                    Number(order.total) +
-                    Number(order.service_fee || 0) +
-                    Number(order.delivery_fee || 0)
-                  ).toFixed(2)}
-                </span>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#71817A]">
+                    Fulfillment Progress
+                  </span>
 
-                {/* STATUS BADGE */}
-                <span
-                  className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                    order.status === 'completed'
-                      ? 'bg-green-50 text-green-700 border border-green-200'
+                  {[
+                    'failed_delivery',
+                    'deactivated'
+                  ].includes(order.status) && (
+                    <span className="text-[9px] font-bold text-red-700">
+                      Progress paused:{' '}
+                      {getAdminOrderStatusLabel(
+                        order
+                      )}
+                    </span>
+                  )}
+                </div>
 
-                      : order.status === 'approved'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                <div className="relative grid grid-cols-5 gap-1.5 text-center">
+                  <div className="absolute left-[9%] right-[9%] top-3.5 h-0.5 bg-[#E5ECE8]" />
 
-                      : order.status === 'processing'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  {getAdminOrderWorkflow(
+                    order
+                  ).map(
+                    (
+                      step,
+                      index,
+                      steps
+                    ) => {
+                      const activeIndex =
+                        steps.findIndex(
+                          (candidate) =>
+                            candidate.key ===
+                            getAdminOrderProgressStatus(
+                              order
+                            )
+                        );
 
-                      : order.status === 'ready'
-                      ? 'bg-teal-50 text-teal-700 border border-teal-200'
+                      const reached =
+                        activeIndex >= index &&
+                        ![
+                          'cancelled',
+                          'rejected'
+                        ].includes(
+                          order.status
+                        );
 
-                      : order.status === 'out_for_delivery'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                      return (
+                        <div
+                          key={step.key}
+                          className="relative z-10 flex flex-col items-center"
+                        >
+                          <span
+                            className={`flex h-7 w-7 items-center justify-center rounded-full border-2 text-[9px] font-extrabold ${
+                              reached
+                                ? 'border-[#166534] bg-[#15803D] text-white'
+                                : 'border-[#DDE6E0] bg-white text-[#71817A]'
+                            }`}
+                          >
+                            {index + 1}
+                          </span>
 
-                      : order.status === 'failed_delivery'
-                      ? 'bg-red-50 text-red-700 border border-red-200'
-
-                      : order.status === 'deactivated'
-                      ? 'bg-steel-100 text-steel-600 border border-steel-200'
-
-                      : order.status === 'rejected'
-                      ? 'bg-red-50 text-red-700 border border-red-200'
-
-                      : order.status === 'cancelled'
-                      ? 'bg-steel-100 text-steel-600 border border-steel-200'
-
-                      : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-                  }`}
-                >
-                  {getAdminOrderStatusLabel(order)}
-                </span>
+                          <span className="mt-1 text-[9px] font-bold leading-tight text-[#52635B]">
+                            {step.label}
+                          </span>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
 
               </div>
 
@@ -5967,40 +7629,305 @@ return (
 
 </div>
 
-{/* FULFILLMENT STATUS TRACKER */}
-<div className="mb-4 rounded-xl border border-[#DDE6E0] bg-white p-4">
-  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-    <span className="text-[10px] font-bold uppercase tracking-wider text-[#71817A]">
-      {order.fulfillment === 'delivery' ? 'Delivery Status Tracker' : 'Pickup Status Tracker'}
-    </span>
-    {['failed_delivery', 'deactivated'].includes(order.status) && (
-      <span className="text-[10px] font-bold text-red-700">
-        Progress paused: {order.status.split('_').join(' ')}
-      </span>
-    )}
-  </div>
-  <div className="relative grid grid-cols-5 gap-2 text-center">
-   <div className="absolute top-4 left-[9%] right-[9%] h-0.5 bg-[#E5ECE8]" />
-    {getAdminOrderWorkflow(order).map((step, index, steps) => {
-      const activeIndex = steps.findIndex(
-        (candidate) => candidate.key === getAdminOrderProgressStatus(order)
-      );
-      const reached = activeIndex >= index && !['cancelled', 'rejected'].includes(order.status);
-      return (
-        <div key={step.key} className="relative z-10 flex flex-col items-center">
-          <span className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[10px] font-extrabold ${
-            reached
-              ? 'border-[#166534] bg-[#15803D] text-white'
-              : 'border-[#DDE6E0] bg-white text-[#71817A]'
-          }`}>
-            {index + 1}
-          </span>
-          <span className="mt-1.5 text-[9px] font-bold leading-tight text-[#52635B]">{step.label}</span>
+{/* AWAITING ONLINE PAYMENT — 48-HOUR REVIEW POINT */}
+{order.status === 'awaiting_payment' &&
+  (() => {
+    const reviewPoint =
+      paymentReviewPoint(order);
+
+    if (!reviewPoint) {
+      return null;
+    }
+
+    const reviewPointReached =
+      reviewPoint.getTime() <=
+      pickupDeadlineNow;
+
+    return (
+      <div
+        className={`mb-4 rounded-xl border px-4 py-3 ${
+          reviewPointReached
+            ? 'border-red-200 bg-red-50'
+            : 'border-amber-200 bg-amber-50/60'
+        }`}
+      >
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <span
+              className={`block text-[10px] font-extrabold uppercase tracking-wider ${
+                reviewPointReached
+                  ? 'text-red-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              {reviewPointReached
+                ? '48-Hour Payment Period Passed — Store Review Required'
+                : 'Awaiting Payment — 48-Hour Review Point'}
+            </span>
+
+            <p
+              className={`mt-1 text-[10px] leading-relaxed ${
+                reviewPointReached
+                  ? 'font-semibold text-red-700'
+                  : 'text-steel-500'
+              }`}
+            >
+              {reviewPointReached
+                ? 'The order remains active until the Admin cancels it. Continue Payment may still succeed while the order remains active, so verify payment status before cancellation.'
+                : 'The customer may continue the existing PayMongo payment. This review point is exactly 48 hours from the original order placement time.'}
+            </p>
+          </div>
+
+          <div className="shrink-0 rounded-lg border border-white/90 bg-white px-3 py-2">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              48-Hour Payment Review Point
+            </span>
+
+            <strong
+              className={`mt-1 block text-xs ${
+                reviewPointReached
+                  ? 'text-red-700'
+                  : 'text-amber-800'
+              }`}
+            >
+              {formatPickupDeadline(
+                reviewPoint
+              )}
+            </strong>
+          </div>
         </div>
-      );
-    })}
+      </div>
+    );
+  })()}
+
+{/* PICKUP 48-HOUR ARRIVAL POLICY */}
+{pickup48HourPolicyApplies(order) &&
+  (() => {
+    const deadline =
+      pickupArrivalDeadline(order);
+
+    if (!deadline) {
+      return null;
+    }
+
+    const deadlineReached =
+      deadline.getTime() <=
+      pickupDeadlineNow;
+
+      const reviewRequired =
+  deadlineReached &&
+  order.status === 'approved';
+
+    return (
+      <div
+        className={`mb-4 rounded-xl border p-4 ${
+          deadlineReached
+            ? 'border-red-200 bg-red-50'
+            : 'border-amber-200 bg-amber-50/60'
+        }`}
+      >
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <span
+              className={`block text-[10px] font-extrabold uppercase tracking-wider ${
+                deadlineReached
+                  ? 'text-red-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              {reviewRequired
+  ? 'Pickup Deadline Passed — Review Required'
+  : 'Pickup — 48-Hour Arrival Policy'}
+            </span>
+
+<p
+  className={`mt-1 text-[10px] ${
+    reviewRequired
+      ? 'font-semibold text-red-700'
+      : 'text-steel-500'
+  }`}
+>
+  {reviewRequired
+    ? 'The 48-hour customer arrival period has ended. This order is still Approved and has not been cancelled. Review the order before deciding whether to cancel it or continue processing after customer verification.'
+    : 'Applies to this Pickup order because no successful online payment has been verified.'}
+</p>
+          </div>
+
+          <span
+            className={`inline-flex rounded-full px-3 py-1.5 text-[10px] font-bold ${
+              deadlineReached
+                ? 'bg-red-100 text-red-700'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {formatPickupTimeRemaining(
+              deadline
+            )}
+          </span>
+        </div>
+
+{reviewRequired && (
+  <div className="mt-4 rounded-lg border border-red-200 bg-white px-3 py-3">
+    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-red-700">
+      Admin Review Required
+    </span>
+
+    <p className="mt-1 text-[10px] font-semibold leading-relaxed text-red-800">
+      The Pickup deadline has passed, but this order has not been automatically cancelled. Confirm whether the customer has arrived before taking further action.
+    </p>
   </div>
-</div>
+)}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Order Placed
+            </span>
+
+            <strong className="mt-1 block text-xs text-[#17372D]">
+              {order.created_at
+                ? formatPickupDeadline(
+                    new Date(
+                      order.created_at
+                    )
+                  )
+                : 'Unavailable'}
+            </strong>
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              48-Hour Deadline
+            </span>
+
+            <strong
+              className={`mt-1 block text-xs ${
+                deadlineReached
+                  ? 'text-red-700'
+                  : 'text-amber-800'
+              }`}
+            >
+              {formatPickupDeadline(
+                deadline
+              )}
+            </strong>
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Pickup / Verification Status
+            </span>
+
+            <strong
+  className={`mt-1 block text-xs ${
+    reviewRequired
+      ? 'text-red-700'
+      : 'text-[#17372D]'
+  }`}
+>
+  {reviewRequired
+    ? 'Deadline Passed — Awaiting Admin Review'
+    : getPickupVerificationStatus(order)}
+</strong>
+          </div>
+        </div>
+      </div>
+    );
+  })()}
+
+{/* CUSTOMER UPDATE HISTORY — STANDARD PICKUP */}
+{order.fulfillment === 'pickup' && (() => {
+
+  const history =
+    order.message_history || [];
+
+  if (history.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-[#DDE6E0] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span className="block text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
+            Customer Update History
+          </span>
+
+          <p className="mt-1 text-[10px] text-steel-500">
+            Previous messages remain available for this order.
+          </p>
+        </div>
+
+        <span className="rounded-full border border-[#DDE6E0] bg-[#F7FAF8] px-2.5 py-1 text-[9px] font-bold text-[#52635B]">
+          {history.length}{' '}
+          {history.length === 1
+            ? 'message'
+            : 'messages'}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {history.map(
+          (entry, index) => {
+            const isLatest =
+              index === history.length - 1;
+
+            const messageDate =
+              new Date(entry.created_at);
+
+            const formattedDate =
+              Number.isNaN(
+                messageDate.getTime()
+              )
+                ? String(entry.created_at)
+                : messageDate.toLocaleString(
+                    'en-PH'
+                  );
+
+            return (
+              <div
+                key={entry.id}
+                className={
+                  isLatest
+                    ? 'rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3'
+                    : 'rounded-lg border border-[#E5ECE8] bg-[#F9FBFA] px-3 py-2.5'
+                }
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={
+                      isLatest
+                        ? 'text-[9px] font-extrabold uppercase tracking-wider text-emerald-700'
+                        : 'text-[9px] font-bold uppercase tracking-wider text-steel-400'
+                    }
+                  >
+                    {isLatest
+                      ? 'Latest Update'
+                      : 'Previous Update'}
+                  </span>
+
+                  <span className="text-[9px] font-medium text-steel-400">
+                    {formattedDate}
+                  </span>
+                </div>
+
+                <p
+                  className={
+                    isLatest
+                      ? 'mt-1.5 whitespace-pre-wrap text-xs font-semibold leading-relaxed text-[#17372D]'
+                      : 'mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-steel-600'
+                  }
+                >
+                  {entry.message}
+                </p>
+              </div>
+            );
+          }
+        )}
+      </div>
+    </div>
+  );
+})()}
 
 {/* PICKUP ADMIN MESSAGE */}
 {order.fulfillment === 'pickup' && (
@@ -6008,25 +7935,62 @@ return (
     className="mb-4 rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-4"
     onSubmit={(event) => {
       event.preventDefault();
-      const formData = new FormData(event.currentTarget);
-      void handleSaveAdminMessage(order.id, String(formData.get('adminMessage') || ''));
+
+      void handleSaveAdminMessage(
+        order.id,
+        adminMessageDrafts[order.id] ?? ''
+      );
     }}
   >
     <label className="block text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
-      Admin Message to Customer
+      New Message to Customer
     </label>
+
+    <p className="mt-1 text-[10px] text-steel-400">
+      Add a new update. Previous messages will remain in the history above.
+    </p>
+
     <div className="mt-2 flex flex-col gap-2 sm:flex-row">
       <textarea
         name="adminMessage"
         maxLength={500}
         rows={2}
-        defaultValue={order.admin_message || ''}
-        placeholder="Add pickup instructions or a note for the customer."
-        className="min-h-20 flex-1 rounded-xl border border-[#DDE6E0] bg-white px-3 py-2 text-xs text-[#34463F] focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15"
+        disabled={
+          order.status === 'completed'
+        }
+        value={
+          adminMessageDrafts[order.id] ??
+          ''
+        }
+        onChange={(event) =>
+          setAdminMessageDrafts(
+            (current) => ({
+              ...current,
+              [order.id]:
+                event.target.value,
+            })
+          )
+        }
+        placeholder={
+          order.status === 'completed'
+            ? 'Completed orders are closed.'
+            : 'Write a new pickup update for the customer.'
+        }
+        className="min-h-20 flex-1 rounded-xl border border-[#DDE6E0] bg-white px-3 py-2 text-xs text-[#34463F] focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15 disabled:cursor-not-allowed disabled:bg-steel-100 disabled:text-steel-500"
       />
+
       <button
         type="submit"
-        className="self-end rounded-xl bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#256548]"
+        disabled={
+          order.status ===
+            'completed' ||
+          !(
+            adminMessageDrafts[
+              order.id
+            ] ?? ''
+          ).trim()
+        }
+        className="self-end rounded-xl bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#256548] disabled:cursor-not-allowed disabled:bg-steel-300"
       >
         Update Message
       </button>
@@ -6067,7 +8031,7 @@ return (
     </div>
 
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
 
       <div className="rounded-lg bg-white border border-amber-100 p-3">
         <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400 block">
@@ -6086,6 +8050,15 @@ return (
         <p className="text-xs font-bold text-steel-800 mt-1">
           {order.delivery_contact_number ||
             'Not provided'}
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-white border border-amber-100 p-3">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400 block">
+          Municipality
+        </span>
+        <p className="text-xs font-bold text-steel-800 mt-1">
+          {order.delivery_municipality || 'Initao'}
         </p>
       </div>
 
@@ -6140,6 +8113,31 @@ return (
 
     </div>
 
+    {order.delivery_latitude !== null &&
+      order.delivery_latitude !== undefined &&
+      order.delivery_longitude !== null &&
+      order.delivery_longitude !== undefined && (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
+          <span className="block text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+            Delivery Location
+          </span>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold text-emerald-900">
+              Location pin confirmed
+            </span>
+            <a
+              href={`https://www.openstreetmap.org/?mlat=${encodeURIComponent(String(order.delivery_latitude))}&mlon=${encodeURIComponent(String(order.delivery_longitude))}#map=18/${encodeURIComponent(String(order.delivery_latitude))}/${encodeURIComponent(String(order.delivery_longitude))}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              View on OpenStreetMap
+            </a>
+          </div>
+        </div>
+      )}
+
 
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
 
@@ -6150,6 +8148,11 @@ return (
         <p className="text-sm font-bold text-steel-900 mt-1">
           ₱{Number(order.total).toFixed(2)}
         </p>
+        {Number(order.discount_amount || 0) > 0 && (
+          <p className="mt-1 text-[9px] font-semibold text-emerald-700">
+            20% first-order discount applied (-₱{Number(order.discount_amount).toFixed(2)})
+          </p>
+        )}
       </div>
 
       <div className="rounded-lg bg-white border border-amber-100 p-3">
@@ -6178,20 +8181,266 @@ return (
 
     </div>
 
-    <form
-  onSubmit={(event) => {
-    event.preventDefault();
+{/* DELIVERY VERIFICATION POLICY */}
+{order.status === 'pending' &&
+  hasSuccessfulOnlinePayment(order) && (
+    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <span className="block text-[10px] font-extrabold uppercase tracking-wider text-emerald-700">
+            Payment Verified — Delivery Review
+          </span>
 
-    const formData =
-      new FormData(event.currentTarget);
+          <p className="mt-1 text-[10px] font-medium leading-relaxed text-emerald-900">
+            The customer&apos;s online payment has been successfully verified.
+            No Cash-on-Delivery 48-hour verification deadline applies to this
+            paid order. Confirm the customer&apos;s phone number and delivery
+            address as needed before approval.
+          </p>
+        </div>
 
-    void handleSaveAdminMessage(
-      order.id,
-      String(
-        formData.get('adminMessage') || ''
-      )
+        <span className="inline-flex shrink-0 rounded-full border border-emerald-200 bg-white px-3 py-1 text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+          Payment Verified
+        </span>
+      </div>
+    </div>
+  )}
+
+{delivery48HourPolicyApplies(order) &&
+  (() => {
+    const deadline =
+      deliveryVerificationDeadline(
+        order
+      );
+
+    if (!deadline) {
+      return null;
+    }
+
+    const deadlineReached =
+      deadline.getTime() <=
+      pickupDeadlineNow;
+
+    return (
+      <div
+        className={`mb-4 rounded-xl border p-4 ${
+          deadlineReached
+            ? 'border-red-200 bg-red-50/70'
+            : 'border-amber-200 bg-amber-50/70'
+        }`}
+      >
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <span
+              className={`block text-[10px] font-extrabold uppercase tracking-wider ${
+                deadlineReached
+                  ? 'text-red-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              Delivery — 48-Hour Verification Policy
+            </span>
+
+            <p
+              className={`mt-1 text-[10px] font-medium leading-relaxed ${
+                deadlineReached
+                  ? 'text-red-800'
+                  : 'text-amber-900'
+              }`}
+            >
+              Rayjin Hardware should verify the customer&apos;s phone number
+              and delivery address within 48 hours from the original order
+              placement time. The order is not rejected automatically when
+              this deadline passes.
+            </p>
+          </div>
+
+          <span
+            className={`inline-flex shrink-0 rounded-full border bg-white px-3 py-1 text-[9px] font-extrabold uppercase tracking-wider ${
+              deadlineReached
+                ? 'border-red-200 text-red-700'
+                : 'border-amber-200 text-amber-700'
+            }`}
+          >
+            {deadlineReached
+              ? 'Admin Review Required'
+              : formatPickupTimeRemaining(
+                  deadline
+                )}
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Order Placed
+            </span>
+
+            <strong className="mt-1 block text-xs text-[#17372D]">
+              {order.created_at
+                ? formatPickupDeadline(
+                    new Date(
+                      order.created_at
+                    )
+                  )
+                : 'Unavailable'}
+            </strong>
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              48-Hour Verification Deadline
+            </span>
+
+            <strong
+              className={`mt-1 block text-xs ${
+                deadlineReached
+                  ? 'text-red-700'
+                  : 'text-amber-800'
+              }`}
+            >
+              {formatPickupDeadline(
+                deadline
+              )}
+            </strong>
+          </div>
+
+          <div className="rounded-lg border border-white/80 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Verification Status
+            </span>
+
+            <strong
+              className={`mt-1 block text-xs ${
+                deadlineReached
+                  ? 'text-red-700'
+                  : 'text-[#17372D]'
+              }`}
+            >
+              {deadlineReached
+                ? 'Deadline Passed — Admin Review Required'
+                : 'Awaiting Phone / Address Verification'}
+            </strong>
+          </div>
+        </div>
+
+        {deadlineReached && (
+          <p className="mt-3 text-[10px] font-semibold leading-relaxed text-red-800">
+            This Delivery order has not been rejected automatically.
+            Review whether customer verification was completed before using
+            the existing rejection or approval workflow.
+          </p>
+        )}
+      </div>
     );
-  }}
+  })()}
+  {/* DELIVERY CUSTOMER UPDATE HISTORY */}
+{(() => {
+  const history =
+    order.message_history || [];
+
+  if (history.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-[#DDE6E0] bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span className="block text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
+            Customer Update History
+          </span>
+
+          <p className="mt-1 text-[10px] text-steel-500">
+            Previous messages remain available for this Delivery order.
+          </p>
+        </div>
+
+        <span className="rounded-full border border-[#DDE6E0] bg-[#F7FAF8] px-2.5 py-1 text-[9px] font-bold text-[#52635B]">
+          {history.length}{' '}
+          {history.length === 1
+            ? 'message'
+            : 'messages'}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {history.map(
+          (entry, index) => {
+            const isLatest =
+              index ===
+              history.length - 1;
+
+            const messageDate =
+              new Date(
+                entry.created_at
+              );
+
+            const formattedDate =
+              Number.isNaN(
+                messageDate.getTime()
+              )
+                ? String(
+                    entry.created_at
+                  )
+                : messageDate.toLocaleString(
+                    'en-PH'
+                  );
+
+            return (
+              <div
+                key={entry.id}
+                className={
+                  isLatest
+                    ? 'rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3'
+                    : 'rounded-lg border border-[#E5ECE8] bg-[#F9FBFA] px-3 py-2.5'
+                }
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={
+                      isLatest
+                        ? 'text-[9px] font-extrabold uppercase tracking-wider text-emerald-700'
+                        : 'text-[9px] font-bold uppercase tracking-wider text-steel-400'
+                    }
+                  >
+                    {isLatest
+                      ? 'Latest Update'
+                      : 'Previous Update'}
+                  </span>
+
+                  <span className="text-[9px] font-medium text-steel-400">
+                    {formattedDate}
+                  </span>
+                </div>
+
+                <p
+                  className={
+                    isLatest
+                      ? 'mt-1.5 whitespace-pre-wrap text-xs font-semibold leading-relaxed text-[#17372D]'
+                      : 'mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-steel-600'
+                  }
+                >
+                  {entry.message}
+                </p>
+              </div>
+            );
+          }
+        )}
+      </div>
+    </div>
+  );
+})()}
+
+      <form
+  onSubmit={(event) => {
+  event.preventDefault();
+
+  void handleSaveAdminMessage(
+    order.id,
+    adminMessageDrafts[order.id] ?? ''
+  );
+}}
   className="space-y-3"
 >
   <div>
@@ -6202,21 +8451,35 @@ return (
       </span>
     </label>
 
-    <textarea
-      name="adminMessage"
-      maxLength={500}
-      rows={3}
-      disabled={[
-        'completed',
-        'rejected',
-        'cancelled'
-      ].includes(order.status)}
-      defaultValue={
-        order.admin_message || ''
-      }
-      placeholder="Add delivery instructions or a note for the customer."
-      className="w-full px-3 py-2.5 text-xs rounded-xl border border-steel-200 bg-white text-steel-800 placeholder:text-steel-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 resize-none disabled:bg-steel-100 disabled:text-steel-500"
-    />
+
+
+
+
+<textarea
+  name="adminMessage"
+  maxLength={500}
+  rows={3}
+  disabled={[
+    'completed',
+    'rejected',
+    'cancelled'
+  ].includes(order.status)}
+  value={
+    adminMessageDrafts[order.id] ??
+    ''
+  }
+  onChange={(event) =>
+    setAdminMessageDrafts(
+      (current) => ({
+        ...current,
+        [order.id]:
+          event.target.value,
+      })
+    )
+  }
+  placeholder="Write a new delivery update for the customer."
+  className="w-full px-3 py-2.5 text-xs rounded-xl border border-steel-200 bg-white text-steel-800 placeholder:text-steel-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 resize-none disabled:bg-steel-100 disabled:text-steel-500"
+/>
   </div>
 
   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -6226,11 +8489,18 @@ return (
 
     <button
       type="submit"
-      disabled={[
-        'completed',
-        'rejected',
-        'cancelled'
-      ].includes(order.status)}
+      disabled={
+  [
+    'completed',
+    'rejected',
+    'cancelled'
+  ].includes(order.status) ||
+  !(
+    adminMessageDrafts[
+      order.id
+    ] ?? ''
+  ).trim()
+}
       className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-steel-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95"
     >
       Update Message
@@ -6242,210 +8512,598 @@ return (
 
 )}
 
-{/* SHOP & GO SCHEDULE */}
-{order.fulfillment === 'shop_go' && (
+{/* SHOP & GO — COMPACT EXPRESS PICKUP WORK AREA */}
+{order.fulfillment === 'shop_go' &&
+  (() => {
+    const scheduleEditable =
+      order.status === 'pending';
 
-  <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+    const history =
+      order.message_history || [];
 
-    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+    const latestUpdate =
+      history.length > 0
+        ? history[
+            history.length - 1
+          ]
+        : null;
 
-      <div>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-          Shop & Go — Express Pickup
-        </span>
-
-        <h4 className="text-sm font-bold text-[#17372D] mt-1">
-          Pickup Schedule
-        </h4>
-
-        <p className="text-[10px] text-steel-500 mt-1">
-          Review the customer's preferred schedule.
-          Keep the same schedule to confirm it, or change
-          the date/time to reschedule.
-        </p>
-      </div>
-
-
-      <div className="rounded-lg bg-white border border-emerald-100 px-4 py-3">
-
-        <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400 block">
-          Customer Requested
-        </span>
-
-        <p className="text-xs font-bold text-steel-800 mt-1">
-          {order.requested_pickup_date
-            ? normalizePickupDateForInput(
-                order.requested_pickup_date
-              )
-            : 'No requested date'}
-        </p>
-
-        <p className="text-xs font-semibold text-emerald-700 mt-0.5">
-          {order.requested_pickup_time
-            ? normalizePickupTimeForInput(
-                order.requested_pickup_time
-              )
-            : 'No requested time'}
-        </p>
-
-      </div>
-
-    </div>
-
-
-    <div className="mb-4 grid gap-3 sm:grid-cols-3">
-      <div className="rounded-lg border border-emerald-100 bg-white p-3">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Product Subtotal</span>
-        <p className="mt-1 text-sm font-bold text-steel-900">₱{Number(order.total).toFixed(2)}</p>
-      </div>
-      <div className="rounded-lg border border-emerald-100 bg-white p-3">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Shop &amp; Go Service Fee</span>
-        <p className="mt-1 text-sm font-bold text-emerald-700">₱{Number(order.service_fee || 50).toFixed(2)}</p>
-      </div>
-      <div className="rounded-lg border border-emerald-100 bg-white p-3">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Order Total</span>
-        <p className="mt-1 text-sm font-bold text-[#17372D]">₱{(Number(order.total) + Number(order.service_fee || 50)).toFixed(2)}</p>
-      </div>
-    </div>
-
-    <form
-      onSubmit={(e) =>
-        handleSaveShopGoSchedule(
-          order.id,
-          e
+    const previousUpdates =
+      history.slice(
+        0,
+        Math.max(
+          history.length - 1,
+          0
         )
-      }
-      className="grid grid-cols-1 md:grid-cols-2 gap-3"
-    >
+      );
 
-      {/* FINAL DATE */}
-      <div>
+    const previousUpdatesExpanded =
+      Boolean(
+        expandedAdminOrderUpdates[
+          order.id
+        ]
+      );
 
-        <label className="block text-[10px] font-bold text-steel-500 uppercase tracking-wider mb-1">
-          Final Pickup Date *
-        </label>
+    const requestedPickupAt =
+      shopGoScheduleDateTime(
+        order.requested_pickup_date,
+        order.requested_pickup_time
+      );
 
-        <input
-          type="date"
-          name="scheduledPickupDate"
-          required
-          disabled={['completed', 'cancelled', 'rejected'].includes(order.status)}
-          defaultValue={
-            normalizePickupDateForInput(
-              order.scheduled_pickup_date ||
-              order.requested_pickup_date
-            )
-          }
-          className="w-full px-3 py-2.5 text-xs rounded-xl border border-steel-200 bg-white text-steel-800 focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/20 focus:border-[#2F7D5A]"
-        />
+    const hasConfirmedSchedule =
+      Boolean(
+        order.status !==
+          'awaiting_payment' &&
+        order.scheduled_pickup_date &&
+        order.scheduled_pickup_time
+      );
 
-      </div>
+    const requestedPickupPassed =
+      Boolean(
+        requestedPickupAt &&
+        !hasConfirmedSchedule &&
+        requestedPickupAt.getTime() <=
+          pickupDeadlineNow
+      );
 
+    const verificationDeadline =
+      shopGo48HourPolicyApplies(
+        order
+      )
+        ? shopGoVerificationDeadline(
+            order
+          )
+        : null;
 
-      {/* FINAL TIME */}
-      <div>
+    const verificationDeadlineReached =
+      Boolean(
+        verificationDeadline &&
+        verificationDeadline.getTime() <=
+          pickupDeadlineNow
+      );
 
-        <label className="block text-[10px] font-bold text-steel-500 uppercase tracking-wider mb-1">
-          Final Pickup Time *
-        </label>
+    const onlinePaymentVerified =
+      hasSuccessfulOnlinePayment(
+        order
+      );
 
-        <input
-          type="time"
-          name="scheduledPickupTime"
-          required
-          disabled={['completed', 'cancelled', 'rejected'].includes(order.status)}
-          defaultValue={
-            normalizePickupTimeForInput(
-              order.scheduled_pickup_time ||
-              order.requested_pickup_time
-            )
-          }
-          className="w-full px-3 py-2.5 text-xs rounded-xl border border-steel-200 bg-white text-steel-800 focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/20 focus:border-[#2F7D5A]"
-        />
+    const formatHistoryDate = (
+      value: string
+    ) => {
+      const date =
+        new Date(value);
 
-      </div>
+      return Number.isNaN(
+        date.getTime()
+      )
+        ? String(value)
+        : date.toLocaleString(
+            'en-PH'
+          );
+    };
 
+    return (
+      <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/35 p-4">
 
-      {/* ADMIN MESSAGE */}
-      <div className="md:col-span-2">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
 
-        <label className="block text-[10px] font-bold text-steel-500 uppercase tracking-wider mb-1">
-          Message to Customer
-          <span className="normal-case font-medium text-steel-400 ml-1">
-            (Optional)
-          </span>
-        </label>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+              Shop & Go — Express Pickup
+            </span>
 
-        <textarea
-          name="adminMessage"
-          maxLength={500}
-          rows={3}
-          disabled={['completed', 'cancelled', 'rejected'].includes(order.status)}
-          defaultValue={
-            order.admin_message || ''
-          }
-          placeholder="Example: Your requested 3:00 PM pickup is unavailable. Please pick up your order after 5:00 PM."
-          className="w-full px-3 py-2.5 text-xs rounded-xl border border-steel-200 bg-white text-steel-800 placeholder:text-steel-400 focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/20 focus:border-[#2F7D5A] resize-none"
-        />
+            <h4 className="mt-1 text-sm font-bold text-[#17372D]">
+              Schedule, customer updates, and pickup coordination
+            </h4>
 
-      </div>
+            <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-steel-500">
+              The final pickup schedule may be confirmed or changed only while the order is Pending. Once the order is approved, the confirmed schedule becomes read-only.
+            </p>
+          </div>
 
+          <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-auto lg:min-w-[360px]">
 
-      <div className="md:col-span-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2.5">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                Customer Requested
+              </span>
 
-        <p className="text-[10px] text-steel-400">
-          Saving the schedule does not automatically approve the order.
-        </p>
+              <strong className="mt-1 block text-xs text-steel-800">
+                {order.requested_pickup_date
+                  ? normalizePickupDateForInput(
+                      order.requested_pickup_date
+                    )
+                  : 'No requested date'}
+                {order.requested_pickup_time
+                  ? ` · ${normalizePickupTimeForInput(
+                      order.requested_pickup_time
+                    )}`
+                  : ''}
+              </strong>
+            </div>
 
-        {!['completed', 'cancelled', 'rejected'].includes(order.status) && (
-          <button
-            type="submit"
-            className="px-4 py-2.5 bg-[#2F7D5A] hover:bg-[#256548] text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95"
+            <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2.5">
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+                Confirmed Schedule
+              </span>
+
+              <strong className="mt-1 block text-xs text-[#17372D]">
+                {hasConfirmedSchedule
+                  ? `${normalizePickupDateForInput(
+                      order.scheduled_pickup_date
+                    )} · ${normalizePickupTimeForInput(
+                      order.scheduled_pickup_time
+                    )}`
+                  : order.status ===
+                      'awaiting_payment'
+                    ? 'Awaiting payment and Admin confirmation'
+                    : 'Awaiting Admin confirmation'}
+              </strong>
+            </div>
+
+          </div>
+
+        </div>
+
+        {order.status ===
+          'awaiting_payment' && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <span className="block text-[9px] font-extrabold uppercase tracking-wider text-amber-700">
+              Schedule Confirmation Locked — Awaiting Payment
+            </span>
+
+            <p className="mt-1 text-[10px] leading-relaxed text-amber-800">
+              The customer&apos;s requested time remains visible for reference, but the final Shop & Go schedule cannot be confirmed until successful PayMongo payment verification returns the order to Pending.
+            </p>
+          </div>
+        )}
+
+        {requestedPickupPassed && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-white px-3 py-2.5">
+            <span className="block text-[9px] font-extrabold uppercase tracking-wider text-amber-700">
+              Requested Pickup Time Reached
+            </span>
+
+            <p className="mt-1 text-[10px] leading-relaxed text-amber-800">
+              {order.status ===
+              'awaiting_payment'
+                ? 'The customer’s requested pickup time has passed while payment is still incomplete. Keep the final schedule locked until payment is verified, then contact the customer and arrange a new confirmed pickup schedule if needed.'
+                : 'The customer’s requested pickup time has passed and no final schedule has been confirmed. Contact the customer and set a new confirmed pickup date and time before approval.'}
+            </p>
+          </div>
+        )}
+
+        {order.status === 'pending' &&
+          onlinePaymentVerified && (
+            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <span className="block text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+                Payment Verified — Schedule Review
+              </span>
+
+              <p className="mt-1 text-[10px] leading-relaxed text-emerald-800">
+                The online payment has been successfully verified. No Cash Shop & Go 48-hour verification deadline applies. Confirm the final pickup schedule before approving the order.
+              </p>
+            </div>
+          )}
+
+        {verificationDeadline && (
+          <div
+            className={`mt-3 rounded-lg border px-3 py-2.5 ${
+              verificationDeadlineReached
+                ? 'border-red-200 bg-red-50'
+                : 'border-amber-200 bg-amber-50'
+            }`}
           >
-            {order.scheduled_pickup_date && order.scheduled_pickup_time
-              ? 'Edit Schedule'
-              : 'Save Confirmed Schedule'}
-          </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <span
+                  className={`block text-[9px] font-extrabold uppercase tracking-wider ${
+                    verificationDeadlineReached
+                      ? 'text-red-700'
+                      : 'text-amber-700'
+                  }`}
+                >
+                  {verificationDeadlineReached
+                    ? 'Shop & Go Verification Period Passed — Review Required'
+                    : 'Shop & Go — 48-Hour Verification Policy'}
+                </span>
+
+                <p
+                  className={`mt-1 text-[10px] leading-relaxed ${
+                    verificationDeadlineReached
+                      ? 'font-semibold text-red-700'
+                      : 'text-amber-800'
+                  }`}
+                >
+                  {verificationDeadlineReached
+                    ? 'The Cash Shop & Go verification and schedule-confirmation period has ended. The order has not been rejected automatically. Review the order before deciding whether to confirm a schedule or reject it.'
+                    : 'Cash Shop & Go verification and final schedule confirmation should be completed within 48 hours from the original order placement time.'}
+                </p>
+              </div>
+
+              <div className="shrink-0 rounded-lg border border-white/90 bg-white px-3 py-2">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                  48-Hour Verification Point
+                </span>
+
+                <strong
+                  className={`mt-1 block text-xs ${
+                    verificationDeadlineReached
+                      ? 'text-red-700'
+                      : 'text-amber-800'
+                  }`}
+                >
+                  {formatPickupDeadline(
+                    verificationDeadline
+                  )}
+                </strong>
+              </div>
+            </div>
+          </div>
         )}
 
-      </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
 
-    </form>
+          <div className="rounded-lg border border-emerald-100 bg-white p-3">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Product Subtotal
+            </span>
+            <p className="mt-1 text-sm font-bold text-steel-900">
+              ₱{Number(
+                order.total
+              ).toFixed(2)}
+            </p>
+            {Number(order.discount_amount || 0) > 0 && (
+              <p className="mt-1 text-[9px] font-semibold text-emerald-700">
+                20% first-order discount applied (-₱{Number(order.discount_amount).toFixed(2)})
+              </p>
+            )}
+          </div>
 
+          <div className="rounded-lg border border-emerald-100 bg-white p-3">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Shop &amp; Go Service Fee
+            </span>
+            <p className="mt-1 text-sm font-bold text-emerald-700">
+              ₱{Number(
+                order.service_fee ||
+                50
+              ).toFixed(2)}
+            </p>
+          </div>
 
-    {/* SAVED SCHEDULE INDICATOR */}
-    {order.scheduled_pickup_date &&
-     order.scheduled_pickup_time && (
+          <div className="rounded-lg border border-emerald-100 bg-white p-3">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">
+              Order Total
+            </span>
+            <p className="mt-1 text-sm font-bold text-[#17372D]">
+              ₱{(
+                Number(order.total) +
+                Number(
+                  order.service_fee ||
+                  50
+                )
+              ).toFixed(2)}
+            </p>
+          </div>
 
-      <div className="mt-3 p-3 rounded-lg bg-white border border-emerald-200">
+        </div>
 
-        <span className="text-[9px] uppercase font-bold tracking-wider text-emerald-700 block">
-          Confirmed / Final Schedule
-        </span>
+        <form
+          onSubmit={(event) =>
+            handleSaveShopGoSchedule(
+              order.id,
+              event
+            )
+          }
+          className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-emerald-100 bg-white p-3 md:grid-cols-2"
+        >
 
-        <p className="text-xs font-bold text-steel-800 mt-1">
-          {normalizePickupDateForInput(
-            order.scheduled_pickup_date
+          <div>
+            <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-steel-500">
+              Final Pickup Date
+            </label>
+
+            <input
+              type="date"
+              name="scheduledPickupDate"
+              required={
+                scheduleEditable
+              }
+              disabled={
+                !scheduleEditable
+              }
+              defaultValue={normalizePickupDateForInput(
+                order.status ===
+                  'awaiting_payment'
+                  ? order.requested_pickup_date
+                  : order.scheduled_pickup_date ||
+                    order.requested_pickup_date
+              )}
+              className="w-full rounded-lg border border-steel-200 bg-white px-3 py-2.5 text-xs text-steel-800 outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/20 disabled:cursor-not-allowed disabled:bg-steel-50 disabled:text-steel-500"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-steel-500">
+              Final Pickup Time
+            </label>
+
+            <input
+              type="time"
+              name="scheduledPickupTime"
+              required={
+                scheduleEditable
+              }
+              disabled={
+                !scheduleEditable
+              }
+              defaultValue={normalizePickupTimeForInput(
+                order.status ===
+                  'awaiting_payment'
+                  ? order.requested_pickup_time
+                  : order.scheduled_pickup_time ||
+                    order.requested_pickup_time
+              )}
+              className="w-full rounded-lg border border-steel-200 bg-white px-3 py-2.5 text-xs text-steel-800 outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/20 disabled:cursor-not-allowed disabled:bg-steel-50 disabled:text-steel-500"
+            />
+          </div>
+
+          <div className="md:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[10px] leading-relaxed text-steel-500">
+              {scheduleEditable
+                ? 'Confirming the schedule does not approve the order. Approve only after the final pickup schedule has been saved.'
+                : order.status ===
+                    'awaiting_payment'
+                  ? 'Schedule confirmation unlocks after successful payment verification.'
+                  : 'The confirmed schedule is read-only after the order leaves Pending status.'}
+            </p>
+
+            {scheduleEditable && (
+              <button
+                type="submit"
+                className="shrink-0 rounded-lg bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#256548] active:scale-95"
+              >
+                {hasConfirmedSchedule
+                  ? 'Edit Confirmed Schedule'
+                  : 'Save Confirmed Schedule'}
+              </button>
+            )}
+          </div>
+
+        </form>
+
+        <div className="mt-3 rounded-xl border border-[#DDE6E0] bg-white p-3">
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="block text-[9px] font-extrabold uppercase tracking-wider text-[#52635B]">
+                Customer Update History
+              </span>
+
+              <p className="mt-0.5 text-[10px] text-steel-500">
+                The latest message stays visible. Older messages are collapsed to keep the work area compact.
+              </p>
+            </div>
+
+            <span className="rounded-full border border-[#DDE6E0] bg-[#F7FAF8] px-2.5 py-1 text-[9px] font-bold text-[#52635B]">
+              {history.length}{' '}
+              {history.length === 1
+                ? 'message'
+                : 'messages'}
+            </span>
+          </div>
+
+          {latestUpdate ? (
+            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+                  Latest Update
+                </span>
+
+                <span className="text-[9px] font-medium text-steel-400">
+                  {formatHistoryDate(
+                    latestUpdate.created_at
+                  )}
+                </span>
+              </div>
+
+              <p className="mt-1 whitespace-pre-wrap text-[11px] font-semibold leading-relaxed text-[#17372D]">
+                {latestUpdate.message}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-dashed border-[#DDE6E0] bg-[#F9FBFA] px-3 py-2.5 text-[10px] text-steel-500">
+              No customer updates have been sent for this Shop & Go order yet.
+            </div>
           )}
-          {' — '}
-          {normalizePickupTimeForInput(
-            order.scheduled_pickup_time
-          )}
-        </p>
 
-        {order.admin_message && (
-          <p className="text-[10px] text-steel-500 mt-2">
-            Message: {order.admin_message}
-          </p>
-        )}
+          {previousUpdates.length > 0 && (
+            <div className="mt-2">
+              <button
+                type="button"
+                aria-expanded={
+                  previousUpdatesExpanded
+                }
+                onClick={() =>
+                  setExpandedAdminOrderUpdates(
+                    (current) => ({
+                      ...current,
+                      [order.id]:
+                        !current[
+                          order.id
+                        ],
+                    })
+                  )
+                }
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-[#E5ECE8] bg-[#F9FBFA] px-3 py-2 text-left transition hover:border-emerald-200 hover:bg-emerald-50/50"
+              >
+                <span>
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-steel-500">
+                    Previous Updates
+                  </span>
+
+                  <span className="mt-0.5 block text-[10px] text-steel-400">
+                    {previousUpdates.length}{' '}
+                    {previousUpdates.length ===
+                    1
+                      ? 'older message'
+                      : 'older messages'}
+                  </span>
+                </span>
+
+                <span className="rounded-full border border-[#DDE6E0] bg-white px-2.5 py-1 text-[9px] font-bold text-[#2F7D5A]">
+                  {previousUpdatesExpanded
+                    ? 'Hide'
+                    : 'View'}
+                </span>
+              </button>
+
+              {previousUpdatesExpanded && (
+                <div className="mt-2 space-y-2">
+                  {previousUpdates.map(
+                    (entry) => (
+                      <div
+                        key={
+                          entry.id
+                        }
+                        className="rounded-lg border border-[#E5ECE8] bg-[#F9FBFA] px-3 py-2.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-steel-400">
+                            Previous Update
+                          </span>
+
+                          <span className="text-[9px] font-medium text-steel-400">
+                            {formatHistoryDate(
+                              entry.created_at
+                            )}
+                          </span>
+                        </div>
+
+                        <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-steel-600">
+                          {entry.message}
+                        </p>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+
+        <form
+          className="mt-3 rounded-xl border border-emerald-100 bg-white p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+
+            void handleSaveAdminMessage(
+              order.id,
+              adminMessageDrafts[
+                order.id
+              ] ?? ''
+            );
+          }}
+        >
+          <div>
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+              Message to Customer
+            </span>
+
+            <p className="mt-0.5 text-[10px] text-steel-400">
+              Send a new Shop & Go update. Previous messages remain in the update history above.
+            </p>
+          </div>
+
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <textarea
+              name="shopGoAdminMessage"
+              maxLength={500}
+              rows={2}
+              disabled={[
+                'completed',
+                'cancelled',
+                'rejected'
+              ].includes(
+                order.status
+              )}
+              value={
+                adminMessageDrafts[
+                  order.id
+                ] ?? ''
+              }
+              onChange={(event) =>
+                setAdminMessageDrafts(
+                  (current) => ({
+                    ...current,
+                    [order.id]:
+                      event.target
+                        .value,
+                  })
+                )
+              }
+              placeholder={
+                [
+                  'completed',
+                  'cancelled',
+                  'rejected'
+                ].includes(
+                  order.status
+                )
+                  ? 'This order is closed.'
+                  : 'Write a new Shop & Go / Express Pickup update for the customer.'
+              }
+              className="min-h-20 flex-1 rounded-lg border border-[#DDE6E0] bg-white px-3 py-2 text-xs text-[#34463F] outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/15 disabled:cursor-not-allowed disabled:bg-steel-100 disabled:text-steel-500"
+            />
+
+            <button
+              type="submit"
+              disabled={
+                [
+                  'completed',
+                  'cancelled',
+                  'rejected'
+                ].includes(
+                  order.status
+                ) ||
+                !(
+                  adminMessageDrafts[
+                    order.id
+                  ] ?? ''
+                ).trim()
+              }
+              className="self-end rounded-lg bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#256548] disabled:cursor-not-allowed disabled:bg-steel-300"
+            >
+              Update Message
+            </button>
+          </div>
+        </form>
 
       </div>
-
-    )}
-
-  </div>
-
-)}
+    );
+  })()}
 
             {/* ORDER ITEMS + ACTIONS */}
             <div className="flex flex-wrap gap-4 items-center justify-between">
@@ -6526,30 +9184,46 @@ return (
 
                   <div className="mr-2">
 
-                    <span className="text-xs font-semibold text-yellow-700 block">
-                      {order.fulfillment === 'delivery'
-  ? 'Mark Out for Delivery'
-  : 'Mark Ready for Pickup'}
-                    </span>
+<span className="text-xs font-semibold text-yellow-700 block">
+  {order.fulfillment === 'delivery'
+    ? 'Review & Approve Delivery'
+    : order.fulfillment === 'shop_go'
+      ? 'Review & Approve Shop & Go'
+      : 'Review & Approve Pickup'}
+</span>
 
                     <span className="text-[10px] text-steel-400">
                       {order.fulfillment === 'delivery'
                         ? 'Review the address and system-calculated delivery fee before approving.'
                         : order.fulfillment === 'shop_go'
-                          ? 'Pickup schedule is confirmed. Verify the order and payment before approving.'
+                          ? order.scheduled_pickup_date &&
+                            order.scheduled_pickup_time
+                            ? 'Final pickup schedule confirmed. Verify the order and payment before approving.'
+                            : 'Confirm the final pickup schedule before approving this Shop & Go order.'
                           : 'Review the customer and order details, then approve the Standard Pickup order.'}
                     </span>
 
                   </div>
+{isPaidOnlineOrder(order) ? (
+  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-right">
+    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+      Paid Online Order
+    </span>
 
-                  <button
-                    onClick={() =>
-                      handleRejectOrder(order.id)
-                    }
-                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-lg transition-all active:scale-95"
-                  >
-                    Reject Order
-                  </button>
+    <span className="mt-0.5 block text-[10px] font-semibold text-emerald-800">
+      Reject action locked
+    </span>
+  </div>
+) : (
+  <button
+    onClick={() =>
+      handleRejectOrder(order.id)
+    }
+    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold rounded-lg transition-all active:scale-95"
+  >
+    Reject Order
+  </button>
+)}
 
                   <button
                     onClick={() =>
@@ -6557,11 +9231,26 @@ return (
                         order.id
                       )
                     }
-                    className="px-4 py-2 bg-[#2F7D5A] hover:bg-[#256548] text-white text-xs font-semibold rounded-lg shadow-sm transition-all active:scale-95"
+                    disabled={
+                      order.fulfillment ===
+                        'shop_go' &&
+                      !(
+                        order.scheduled_pickup_date &&
+                        order.scheduled_pickup_time
+                      )
+                    }
+                    className="px-4 py-2 bg-[#2F7D5A] hover:bg-[#256548] disabled:bg-steel-300 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg shadow-sm transition-all active:scale-95"
                   >
                     {order.fulfillment === 'delivery'
                       ? 'Approve Delivery'
-                      : 'Approve Order'}
+                      : order.fulfillment ===
+                          'shop_go' &&
+                        !(
+                          order.scheduled_pickup_date &&
+                          order.scheduled_pickup_time
+                        )
+                        ? 'Confirm Schedule First'
+                        : 'Approve Order'}
                   </button>
 
                 </div>
@@ -6570,14 +9259,20 @@ return (
 
                 <div className="flex flex-col items-end gap-1.5">
                   {order.fulfillment === 'pickup' && (
-                    <span className="text-[10px] font-semibold text-amber-700">
-                      {(order.payment_method ||
-                      order.paymentMethod ||
-                     'cash') === 'cash'
-  ? 'Cash payment will be confirmed when the customer collects the order.'
-  : 'Online payment confirmed. The order can now be processed.'}
-                    </span>
-                  )}
+  <div className="max-w-md rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+    <span className="block text-[10px] font-bold uppercase tracking-wider text-amber-800">
+      Awaiting Customer Arrival
+    </span>
+
+    <span className="mt-0.5 block text-[10px] leading-relaxed text-amber-700">
+      {(order.payment_method ||
+        order.paymentMethod ||
+        'cash') === 'cash'
+        ? `Please wait for the customer to arrive and present Order ID ${order.id}. Verify the Order ID and complete the required in-store cash payment before starting order processing and preparation.`
+        : `Payment confirmed. Please wait for the customer to arrive and present Order ID ${order.id}. Order processing and preparation should begin only after the Order ID has been verified.`}
+    </span>
+  </div>
+)}
                   <button
                     onClick={() =>
                       handleAdvanceOrderStatus(
@@ -6586,7 +9281,9 @@ return (
                     }
                     className="px-4 py-2 bg-[#2F7D5A] hover:bg-[#256548] text-white text-xs font-semibold rounded-lg shadow-sm transition-all active:scale-95"
                   >
-                Start Processing
+                {order.fulfillment === 'pickup'
+  ? 'Verify Order ID & Start Processing'
+  : 'Start Processing'}
                   </button>
                 </div>
 
@@ -6629,53 +9326,128 @@ return (
 
             </div>
 
-            {!['completed', 'cancelled', 'rejected'].includes(order.status) && (
-              <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-steel-100 pt-4">
-                {order.fulfillment === 'delivery' ? (
-                  <>
-                    {!['failed_delivery', 'deactivated'].includes(order.status) && (
-                      <>
-                        {order.status === 'out_for_delivery' && (
-                          <button
-                            type="button"
-                            onClick={() => handleOrderAction(order, 'failed_delivery')}
-                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
-                          >
-                            Failed Delivery
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleOrderAction(order, 'deactivate')}
-                          className="rounded-lg border border-steel-200 bg-steel-50 px-3 py-2 text-[10px] font-bold text-steel-700 hover:bg-steel-100"
-                        >
-                          Deactivate Order
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleOrderAction(order, 'cancel_permanently')}
-                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-bold text-red-700 hover:bg-red-100"
-                    >
-                      Cancel Order Permanently
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleOrderAction(order, 'cancel')}
-                    className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-bold text-red-700 hover:bg-red-100"
-                  >
-                    Cancel Order
-                  </button>
-                )}
-              </div>
-            )}
+{(() => {
+  const canDeactivate =
+    canDeactivateDeliveryOrder(order);
+
+  const canMarkFailedDelivery =
+    order.fulfillment === 'delivery' &&
+    order.status === 'out_for_delivery';
+
+  const canCancelDelivery =
+    canPermanentlyCancelDelivery(order);
+
+  const canCancelStandard =
+    canCancelStandardOrder(order);
+
+  const hasSecondaryActions =
+    canDeactivate ||
+    canMarkFailedDelivery ||
+    canCancelDelivery ||
+    canCancelStandard;
+
+  if (!hasSecondaryActions) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-steel-100 pt-4">
+      {canMarkFailedDelivery && (
+        <button
+          type="button"
+          onClick={() =>
+            handleOrderAction(
+              order,
+              'failed_delivery'
+            )
+          }
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
+        >
+          Failed Delivery
+        </button>
+      )}
+
+      {canDeactivate && (
+        <button
+          type="button"
+          onClick={() =>
+            handleOrderAction(
+              order,
+              'deactivate'
+            )
+          }
+          className="rounded-lg border border-steel-200 bg-steel-50 px-3 py-2 text-[10px] font-bold text-steel-700 hover:bg-steel-100"
+        >
+          Deactivate Order
+        </button>
+      )}
+
+      {order.fulfillment === 'delivery' &&
+        canCancelDelivery &&
+        (isPaidOnlineOrder(order) ? (
+          <div className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-left sm:ml-auto sm:max-w-xl">
+            <span className="block text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+              Paid Online Order — Cancellation Locked
+            </span>
+
+            <p className="mt-1 text-[10px] font-semibold leading-relaxed text-emerald-800">
+              This order has a successfully verified PayMongo payment. Reject and Cancel actions are unavailable because refund processing is not supported by this system.
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              handleOrderAction(
+                order,
+                'cancel_permanently'
+              )
+            }
+            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-bold text-red-700 hover:bg-red-100"
+          >
+            {order.status === 'awaiting_payment'
+              ? 'Cancel Unpaid Order'
+              : 'Cancel Order Permanently'}
+          </button>
+        ))}
+
+      {order.fulfillment !== 'delivery' &&
+        canCancelStandard &&
+        (isPaidOnlineOrder(order) ? (
+          <div className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-left sm:ml-auto sm:max-w-xl">
+            <span className="block text-[9px] font-extrabold uppercase tracking-wider text-emerald-700">
+              Paid Online Order — Cancellation Locked
+            </span>
+
+            <p className="mt-1 text-[10px] font-semibold leading-relaxed text-emerald-800">
+              This order has a successfully verified PayMongo payment. Reject and Cancel actions are unavailable because refund processing is not supported by this system.
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              handleOrderAction(
+                order,
+                'cancel'
+              )
+            }
+            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-bold text-red-700 hover:bg-red-100"
+          >
+            {order.status === 'awaiting_payment'
+              ? 'Cancel Unpaid Order'
+              : 'Cancel Order'}
+          </button>
+        ))}
+    </div>
+  );
+})()}
 
           </div>
 
-        ))}
+        </React.Fragment>
+      );
+    })}
 
       </div>
 
@@ -6693,7 +9465,7 @@ return (
                   Delivery Rates
                 </h2>
                 <p className="text-sm text-steel-500 mt-1">
-                  Manage delivery availability and barangay surcharges within Initao.
+                  Manage delivery availability and barangay surcharges for Initao, Libertad, Naawan, and Gitagum.
                 </p>
               </div>
 
@@ -6737,8 +9509,135 @@ return (
 
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 text-xs text-emerald-800">
               <strong>Estimated delivery fee</strong> = the highest product-load base fee
-              + the selected barangay surcharge. The Admin may still confirm a different
+              + the selected municipality/barangay surcharge. The Admin may still confirm a different
               final fee while reviewing difficult-to-reach delivery addresses.
+            </div>
+
+            <div className="rounded-2xl border border-steel-200/70 bg-white p-4 shadow-sm">
+              <div className="mb-4">
+                <h3 className="text-sm font-bold text-steel-900">Add Delivery Area</h3>
+                <p className="mt-1 text-[10px] leading-relaxed text-steel-500">
+                  Add only client-approved municipality/barangay rates. No surcharge is generated automatically.
+                  New areas are unavailable by default unless you explicitly mark them Active.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-steel-500">
+                  Municipality
+                  <select
+                    value={newDeliveryRate.municipality}
+                    onChange={(event) =>
+                      setNewDeliveryRate((current) => ({
+                        ...current,
+                        municipality: event.target.value,
+                        barangay: '',
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs normal-case tracking-normal outline-none focus:border-[#2F7D5A]"
+                  >
+                    <option value="">Select municipality</option>
+                    {deliveryAreas.municipalities.map((municipality) => (
+                      <option key={municipality} value={municipality}>{municipality}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-[10px] font-bold uppercase tracking-wider text-steel-500">
+                  Barangay
+                  <select
+                    value={newDeliveryRate.barangay}
+                    disabled={!newDeliveryRate.municipality}
+                    onChange={(event) =>
+                      setNewDeliveryRate((current) => ({
+                        ...current,
+                        barangay: event.target.value,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs normal-case tracking-normal outline-none focus:border-[#2F7D5A] disabled:bg-steel-50"
+                  >
+                    <option value="">Select barangay</option>
+                    {(deliveryAreas.barangays[newDeliveryRate.municipality] || [])
+                      .filter((barangay) =>
+                        !deliveryRateSettings.some(
+                          (rate) =>
+                            rate.municipality === newDeliveryRate.municipality &&
+                            rate.barangay === barangay
+                        )
+                      )
+                      .map((barangay) => (
+                        <option key={barangay} value={barangay}>{barangay}</option>
+                      ))}
+                  </select>
+                </label>
+
+                <label className="text-[10px] font-bold uppercase tracking-wider text-steel-500">
+                  Zone
+                  <select
+                    value={newDeliveryRate.zone}
+                    onChange={(event) =>
+                      setNewDeliveryRate((current) => ({
+                        ...current,
+                        zone: event.target.value as '' | DeliveryZone,
+                      }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs normal-case tracking-normal outline-none focus:border-[#2F7D5A]"
+                  >
+                    <option value="">Select zone</option>
+                    <option value="poblacion">Poblacion</option>
+                    <option value="near">Near</option>
+                    <option value="medium">Medium</option>
+                    <option value="far">Far</option>
+                  </select>
+                </label>
+
+                <label className="text-[10px] font-bold uppercase tracking-wider text-steel-500">
+                  Surcharge
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-steel-500">₱</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="5000"
+                      step="1"
+                      value={newDeliveryRate.surcharge}
+                      onChange={(event) =>
+                        setNewDeliveryRate((current) => ({
+                          ...current,
+                          surcharge: event.target.value,
+                        }))
+                      }
+                      placeholder="Client-approved amount"
+                      className="w-full rounded-lg border border-steel-200 bg-white py-2 pl-7 pr-3 text-xs normal-case tracking-normal outline-none focus:border-[#2F7D5A]"
+                    />
+                  </div>
+                </label>
+
+                <div className="flex items-end gap-2">
+                  <label className="flex h-9 items-center gap-2 rounded-lg border border-steel-200 bg-steel-50 px-3 text-[10px] font-bold text-steel-600">
+                    <input
+                      type="checkbox"
+                      checked={newDeliveryRate.is_active}
+                      onChange={(event) =>
+                        setNewDeliveryRate((current) => ({
+                          ...current,
+                          is_active: event.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 accent-[#2F7D5A]"
+                    />
+                    Active
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleAddDeliveryRate}
+                    disabled={addingDeliveryRate}
+                    className="h-9 flex-1 rounded-lg bg-[#2F7D5A] px-3 text-[10px] font-bold text-white hover:bg-[#256548] disabled:opacity-60"
+                  >
+                    {addingDeliveryRate ? 'Adding…' : 'Add Area'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {deliveryRatesMessage && (
@@ -6764,9 +9663,10 @@ return (
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left">
+                  <table className="w-full min-w-[900px] text-left">
                     <thead className="bg-[#F5F7F5] border-b border-steel-200">
                       <tr className="text-[10px] uppercase tracking-wider text-steel-500">
+                        <th className="px-5 py-3 font-bold">Municipality</th>
                         <th className="px-5 py-3 font-bold">Barangay</th>
                         <th className="px-5 py-3 font-bold">Zone</th>
                         <th className="px-5 py-3 font-bold">Surcharge</th>
@@ -6785,6 +9685,12 @@ return (
                               : 'bg-steel-50/70 opacity-75'
                           }
                         >
+                          <td className="px-5 py-4">
+                            <span className="text-xs font-bold text-steel-700">
+                              {rate.municipality}
+                            </span>
+                          </td>
+
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-2.5">
                               <div className="w-8 h-8 rounded-lg bg-[#2F7D5A]/10 text-[#2F7D5A] flex items-center justify-center">
@@ -7350,15 +10256,25 @@ return (
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">Stock Qty</label>
+                      <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">
+                        {editingProduct ? 'Current Stock' : 'Stock Qty'}
+                      </label>
                       <input 
                         type="number" 
                         required
+                        readOnly={Boolean(editingProduct)}
                         value={newProduct.stock}
-                        onChange={(e) => setNewProduct({ ...newProduct, stock: e.target.value })}
+                        onChange={(e) => {
+                          if (!editingProduct) setNewProduct({ ...newProduct, stock: e.target.value });
+                        }}
                         placeholder="25"
-                        className="w-full px-3 py-2 text-xs rounded-lg border border-steel-200 bg-white text-steel-950 focus:outline-none focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500"
+                        className={`w-full px-3 py-2 text-xs rounded-lg border border-steel-200 text-steel-950 focus:outline-none focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500 ${editingProduct ? 'bg-steel-50 cursor-not-allowed' : 'bg-white'}`}
                       />
+                      {editingProduct && (
+                        <p className="mt-1 text-[9px] leading-4 text-amber-700">
+                          Stock is ledger-controlled. Use Stock Adjustment / Physical Count for verified discrepancies.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -7381,8 +10297,74 @@ return (
                         className="mt-2 w-full rounded-lg border border-[#B9D8C7] bg-white px-3 py-2 text-xs text-steel-950 focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15"
                       />
                       <p className="mt-1 text-[10px] text-[#71817A]">
-                        The product and its opening Stock-In movement are saved together.
+                        The product and its opening Stock-In movement are saved together. Rayjin automatically assigns an OPEN system reference after saving.
                       </p>
+
+                      <div className="mt-3 border-t border-[#DCEBE2] pt-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#2F7D5A]">Supplier Documentation</p>
+                        <p className="mt-1 text-[9px] leading-4 text-[#71817A]">Optional supporting documentation for later audit and reference.</p>
+                      </div>
+
+                      <label className="mt-3 block text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
+                        Supplier Reference No. <span className="normal-case font-medium text-[#819087]">(Optional)</span>
+                        <input
+                          type="text"
+                          maxLength={120}
+                          value={newProduct.opening_supplier_reference}
+                          onChange={(event) => setNewProduct({
+                            ...newProduct,
+                            opening_supplier_reference: event.target.value,
+                          })}
+                          placeholder="DR / SI / invoice number when available"
+                          className="mt-2 w-full rounded-lg border border-[#B9D8C7] bg-white px-3 py-2 text-xs normal-case tracking-normal text-steel-950 focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15"
+                        />
+                        <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-[#819087]">
+                          Enter the supplier's invoice, delivery receipt, or document number when available.
+                        </span>
+                      </label>
+
+                      <div className="mt-3 border-t border-[#DCEBE2] pt-3">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
+                          Supplier Receipt / Delivery Document <span className="normal-case font-medium text-[#819087]">(Optional)</span>
+                        </label>
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <label className="cursor-pointer rounded-lg border border-[#B9D8C7] bg-white px-3 py-2 text-[10px] font-bold text-[#0D7740] transition hover:bg-[#EAF7EF]">
+                            {newProduct.opening_receipt_image ? 'Replace Receipt' : 'Attach Receipt'}
+                            <input
+                              key={newProduct.opening_receipt_image ? 'opening-receipt-attached' : 'opening-receipt-empty'}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              onChange={handleOpeningReceiptChange}
+                            />
+                          </label>
+
+                          {newProduct.opening_receipt_image && (
+                            <>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[9px] font-bold text-emerald-700">
+                                <CheckCircle className="h-3 w-3" /> Receipt attached
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setNewProduct((current) => ({
+                                    ...current,
+                                    opening_receipt_image: '',
+                                  }))
+                                }
+                                className="text-[10px] font-bold text-red-600 hover:text-red-700"
+                              >
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                        <p className="mt-1.5 text-[9px] leading-4 text-[#819087]">
+                          JPG, PNG, or WEBP up to 5 MB. Supporting documents are linked to this single Opening Inventory Stock-In record and do not affect stock or costing.
+                        </p>
+                      </div>
                     </div>
                   )}
 
@@ -7539,6 +10521,65 @@ return (
                     </p>
                   </div>
 
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/35 p-3 space-y-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">
+                        Fulfillment Availability
+                      </span>
+                      <p className="text-[10px] text-steel-500 mt-1">
+                        Choose whether customers may use all fulfillment methods or Delivery only.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                        newProduct.fulfillment_rule === 'all'
+                          ? 'border-emerald-500 bg-white ring-1 ring-emerald-500/15'
+                          : 'border-steel-200 bg-white/70 hover:border-emerald-200'
+                      }`}>
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="radio"
+                            name="fulfillment_rule"
+                            value="all"
+                            checked={newProduct.fulfillment_rule === 'all'}
+                            onChange={() => setNewProduct({ ...newProduct, fulfillment_rule: 'all' })}
+                            className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <div>
+                            <span className="block text-xs font-bold text-steel-800">All methods</span>
+                            <span className="mt-0.5 block text-[9px] leading-relaxed text-steel-500">
+                              Pickup + Shop &amp; Go + Delivery
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+
+                      <label className={`cursor-pointer rounded-lg border p-3 transition-all ${
+                        newProduct.fulfillment_rule === 'delivery_only'
+                          ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500/15'
+                          : 'border-steel-200 bg-white/70 hover:border-amber-200'
+                      }`}>
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="radio"
+                            name="fulfillment_rule"
+                            value="delivery_only"
+                            checked={newProduct.fulfillment_rule === 'delivery_only'}
+                            onChange={() => setNewProduct({ ...newProduct, fulfillment_rule: 'delivery_only' })}
+                            className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                          />
+                          <div>
+                            <span className="block text-xs font-bold text-steel-800">Delivery only</span>
+                            <span className="mt-0.5 block text-[9px] leading-relaxed text-steel-500">
+                              For heavy or impractical-to-pick-up products.
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">Status</label>
                     <select
@@ -7605,7 +10646,10 @@ setNewProduct({
   status: 'active',
   delivery_class: 'standard',
   bulk_quantity_threshold: '',
+  fulfillment_rule: 'all',
   opening_supplier_price: '',
+  opening_supplier_reference: '',
+  opening_receipt_image: '',
 });
                         }}
                         className="py-2.5 px-3 bg-steel-100 hover:bg-steel-200 text-steel-700 font-bold rounded-lg text-xs transition-all active:scale-95"
@@ -7785,6 +10829,12 @@ setNewProduct({
                 ? ` · Bulky at ${p.bulk_quantity_threshold}+ units`
                 : ''}
             </span>
+
+            {p.fulfillment_rule === 'delivery_only' && (
+              <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
+                Delivery Only
+              </span>
+            )}
           </div>
         </div>
 
@@ -7846,7 +10896,12 @@ setNewProduct({
           p.bulk_quantity_threshold
         ),
 
-  opening_supplier_price: ''
+  fulfillment_rule:
+    p.fulfillment_rule || 'all',
+
+  opening_supplier_price: '',
+  opening_supplier_reference: '',
+  opening_receipt_image: ''
 });
               }}
               className="px-2.5 py-1.5 bg-steel-100 hover:bg-steel-200 text-steel-700 text-[10px] font-bold rounded-lg transition-all"
@@ -7855,10 +10910,16 @@ setNewProduct({
             </button>
 
             <button
-              onClick={() => handleDeleteProduct(p.id)}
-              className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold rounded-lg transition-all"
+              onClick={() => handleToggleProductStatus(p)}
+              className={`px-2.5 py-1.5 text-[10px] font-bold rounded-lg transition-all ${
+                p.status === 'inactive'
+                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700'
+              }`}
             >
-              Delete
+              {p.status === 'inactive'
+                ? 'Activate'
+                : 'Deactivate'}
             </button>
           </div>
         </div>
@@ -7874,13 +10935,38 @@ setNewProduct({
 </div>
 )}
 
+{/* PURCHASE ORDERS */}
+{activeTab === 'purchaseOrders' && (
+  <PurchaseOrdersPanel onReceiveItem={handlePurchaseOrderReceiveItem} />
+)}
+
+
+{/* REORDER SUGGESTIONS */}
+{activeTab === 'reorderSuggestions' && (
+  <ReorderSuggestionsPanel
+    onOpenPurchaseOrders={() => setActiveTab('purchaseOrders')}
+    onManageSuppliers={() => setActiveTab('suppliers')}
+    onManageProducts={() => setActiveTab('products')}
+  />
+)}
+
 {/* DEDICATED STOCK RECEIVING */}
+{activeTab === 'inventoryAdjustment' && (
+  <InventoryAdjustmentPanel
+    products={products}
+    onAdjusted={async () => {
+      await Promise.all([fetchProducts(), fetchInventoryMovements()]);
+    }}
+    onViewMovements={() => setActiveTab('movementHistory')}
+  />
+)}
+
 {activeTab === 'receiveStock' && (
   <div className="space-y-6 animate-fade-up">
     <div>
       <h2 className="text-2xl font-bold font-display text-steel-950">Receive Stock</h2>
       <p className="mt-1 text-sm text-steel-500">
-        Record supplier deliveries, attach the receipt, and update inventory in one transaction.
+        Record physical supplier deliveries in one Stock-In transaction. Supporting supplier documents are optional, and Rayjin automatically assigns the RCV system reference.
       </p>
     </div>
 
@@ -7896,6 +10982,43 @@ setNewProduct({
         </div>
       )}
 
+      {stockReceiving.purchase_order_item_id && (
+        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-800">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-bold">Receiving against {stockReceiving.purchase_order_number}</p>
+              <p className="mt-1 text-[11px] leading-5 text-blue-700">
+                Product and supplier are locked to the Purchase Order. Up to {stockReceiving.purchase_order_remaining_quantity} unit(s) remain on this line. Enter the actual quantity and actual supplier cost delivered today.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setStockReceiving((current) => ({
+                  ...current,
+                  product_id: '',
+                  supplier_id: '',
+                  quantity: '',
+                  supplier_price: '',
+                  selling_price: '',
+                  purchase_order_item_id: '',
+                  purchase_order_id: '',
+                  purchase_order_number: '',
+                  purchase_order_remaining_quantity: '',
+                }));
+                setStockReceivingProductQuery('');
+                setStockReceivingSupplierQuery('');
+                setStockReceivingStatus('idle');
+                setStockReceivingMessage('');
+              }}
+              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-[10px] font-bold text-blue-700 hover:bg-blue-100"
+            >
+              Switch to Direct Receiving
+            </button>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleStockReceiving} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <label className="block text-xs font-bold uppercase tracking-wider text-steel-500">
           1. Product
@@ -7903,6 +11026,7 @@ setNewProduct({
             list="receiving-products"
             required
             value={stockReceivingProductQuery}
+            readOnly={Boolean(stockReceiving.purchase_order_item_id)}
             onChange={(event) => {
               const value = event.target.value;
               const product = products.find((item) => productSelectorLabel(item) === value);
@@ -7932,6 +11056,7 @@ setNewProduct({
             list="receiving-suppliers"
             required
             value={stockReceivingSupplierQuery}
+            readOnly={Boolean(stockReceiving.purchase_order_item_id)}
             onChange={(event) => {
               const value = event.target.value;
               const supplier = suppliers.find((item) => supplierSelectorLabel(item) === value);
@@ -7955,6 +11080,7 @@ setNewProduct({
           3. Quantity
           <input
             type="number" min="1" step="1" required value={stockReceiving.quantity}
+            max={stockReceiving.purchase_order_item_id ? Number(stockReceiving.purchase_order_remaining_quantity || 0) : undefined}
             onChange={(event) => setStockReceiving({ ...stockReceiving, quantity: event.target.value })}
             className="mt-1 w-full rounded-lg border border-steel-200 px-3 py-2.5 text-xs normal-case tracking-normal focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15"
           />
@@ -7969,16 +11095,38 @@ setNewProduct({
           />
         </label>
 
+        <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-[#DDE6E0] bg-[#F8FBF9] p-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#2F7D5A]">Supplier Documentation <span className="normal-case font-medium text-[#819087]">(Optional)</span></p>
+          <p className="mt-1 text-[10px] leading-4 text-[#71817A]">
+            Add the supplier document number and/or image when available. Rayjin will still record the physical stock receipt when supporting paperwork is unavailable.
+          </p>
+        </div>
+
         <label className="block text-xs font-bold uppercase tracking-wider text-steel-500">
-          5. Receipt Attachment
+          5. Supplier Reference No. <span className="normal-case font-medium text-[#819087]">(Optional)</span>
           <input
-            type="file" accept="image/jpeg,image/png,image/webp" required onChange={handleReceiptChange}
-            className="mt-1 block w-full rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs normal-case tracking-normal file:mr-3 file:rounded-md file:border-0 file:bg-[#E4F5EA] file:px-3 file:py-1.5 file:text-[10px] file:font-bold file:text-[#0D7740]"
+            type="text"
+            maxLength={120}
+            value={stockReceiving.supplier_reference}
+            onChange={(event) => setStockReceiving({ ...stockReceiving, supplier_reference: event.target.value })}
+            placeholder="DR / SI / invoice number when available"
+            className="mt-1 w-full rounded-lg border border-steel-200 px-3 py-2.5 text-xs normal-case tracking-normal focus:border-[#2F7D5A] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/15"
           />
+          <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-[#819087]">Supplier-issued document number for audit/reference only.</span>
         </label>
 
         <label className="block text-xs font-bold uppercase tracking-wider text-steel-500">
-          6. Selling Price (₱)
+          6. Supplier Receipt / Delivery Document <span className="normal-case font-medium text-[#819087]">(Optional)</span>
+          <input
+            key={stockReceivingReceiptInputKey}
+            type="file" accept="image/jpeg,image/png,image/webp" onChange={handleReceiptChange}
+            className="mt-1 block w-full rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs normal-case tracking-normal file:mr-3 file:rounded-md file:border-0 file:bg-[#E4F5EA] file:px-3 file:py-1.5 file:text-[10px] file:font-bold file:text-[#0D7740]"
+          />
+          <span className="mt-1 block text-[9px] font-medium normal-case tracking-normal text-[#819087]">JPG, PNG, or WEBP up to 5 MB. The attachment is supporting evidence only and does not affect inventory quantity or costing.</span>
+        </label>
+
+        <label className="block text-xs font-bold uppercase tracking-wider text-steel-500">
+          7. Selling Price (₱)
           <input
             type="number" min="0.01" step="0.01" required value={stockReceiving.selling_price}
             onChange={(event) => setStockReceiving({ ...stockReceiving, selling_price: event.target.value })}
@@ -7988,7 +11136,19 @@ setNewProduct({
 
         {stockReceiving.receipt_image && (
           <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-[#CDE4D6] bg-[#F7FAF8] p-3">
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#52635B]">Receipt Preview</p>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[#52635B]">Receipt Preview</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setStockReceiving((current) => ({ ...current, receipt_image: '' }));
+                  setStockReceivingReceiptInputKey((current) => current + 1);
+                }}
+                className="text-[10px] font-bold text-red-600 transition hover:text-red-700"
+              >
+                Remove Attachment
+              </button>
+            </div>
             <img src={stockReceiving.receipt_image} alt="Receipt preview" className="max-h-56 rounded-lg border border-[#DDE6E0] object-contain" />
           </div>
         )}
@@ -8006,44 +11166,61 @@ setNewProduct({
     </section>
 
     <section className="rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="font-display text-base font-bold text-[#17372D]">Received Stock History</h3>
-          <p className="mt-1 text-xs text-[#71817A]">Trace received items, supplier costs, receipts, and recorded dates.</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#2F7D5A]">Inventory Audit</p>
+          <h3 className="mt-1 font-display text-base font-bold text-[#17372D]">Recent Stock-In</h3>
+          <p className="mt-1 text-xs text-[#71817A]">The latest Opening Inventory and Stock Receiving entries from the centralized Inventory Movement ledger.</p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <input
-            type="search" value={stockReceivingSearch}
-            onChange={(event) => setStockReceivingSearch(event.target.value)}
-            placeholder="Search product, barcode, supplier"
-            className="rounded-lg border border-steel-200 px-3 py-2 text-xs focus:border-[#2F7D5A] focus:outline-none"
-          />
-          <input type="date" value={stockReceivingDateFrom} onChange={(event) => setStockReceivingDateFrom(event.target.value)} className="rounded-lg border border-steel-200 px-3 py-2 text-xs" />
-          <input type="date" value={stockReceivingDateTo} onChange={(event) => setStockReceivingDateTo(event.target.value)} className="rounded-lg border border-steel-200 px-3 py-2 text-xs" />
-        </div>
+        <button
+          type="button"
+          onClick={openAllStockInMovements}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#CFE0D7] bg-[#F8FBF9] px-4 py-2.5 text-xs font-bold text-[#0D7740] transition hover:border-[#8FC6A8] hover:bg-[#EEF8F2]"
+        >
+          <ArrowLeftRight className="h-4 w-4" />
+          View All Stock-In Movements
+        </button>
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-xl border border-[#DDE6E0]">
-        <table className="min-w-full text-left text-xs">
-          <thead className="bg-[#EEF5F1] text-[9px] uppercase tracking-wider text-[#587067]">
-            <tr>{['Product', 'Supplier(s)', 'Qty', 'Supplier Cost', 'Receipt', 'Selling Price', 'Date / Time'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr>
-          </thead>
-          <tbody className="divide-y divide-[#E5ECE8]">
-            {receivedStockHistory.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-[#71817A]">No received-stock records match the filters.</td></tr>
-            ) : receivedStockHistory.map((movement) => (
-              <tr key={movement.movement_id} className="hover:bg-[#F8FAF9]">
-                <td className="px-4 py-3"><strong className="block text-[#34463F]">{movement.product_name}</strong><span className="text-[9px] text-[#71817A]">{movement.barcode || 'No barcode'}</span></td>
-                <td className="px-4 py-3">{movement.supplier_name || 'Not recorded'}</td>
-                <td className="px-4 py-3 font-bold">{movement.quantity}</td>
-                <td className="px-4 py-3">{formatPeso(Number(movement.supplier_price))}</td>
-                <td className="px-4 py-3">{movement.receipt_path ? <a href={movement.receipt_path} target="_blank" rel="noreferrer" className="font-bold text-[#0D7740] hover:underline">View receipt</a> : 'None'}</td>
-                <td className="px-4 py-3">{formatPeso(Number(movement.selling_price))}</td>
-                <td className="whitespace-nowrap px-4 py-3">{new Date(movement.movement_date).toLocaleString('en-PH')}</td>
-              </tr>
+      <div className="mt-4 overflow-hidden rounded-xl border border-[#DDE6E0]">
+        {recentStockInMovements.length === 0 ? (
+          <div className="px-4 py-9 text-center text-xs text-[#71817A]">No Stock-In movements recorded yet.</div>
+        ) : (
+          <div className="divide-y divide-[#E5ECE8]">
+            {recentStockInMovements.map((movement) => (
+              <div key={movement.movement_id} className="grid gap-3 px-4 py-3 transition hover:bg-[#F8FAF9] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-bold ${movement.source_label === 'Opening Inventory' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                      {movement.source_label || 'Stock Receiving'}
+                    </span>
+                    <span className="text-[10px] font-bold text-[#2F7D5A]">{movement.reference_label || '—'}</span>
+                    <span className="text-[10px] text-[#71817A]">{new Date(movement.movement_date).toLocaleString('en-PH')}</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs font-bold text-[#34463F]">{movement.product_name}</p>
+                  <p className="mt-0.5 text-[10px] text-[#71817A]">
+                    {movement.supplier_name || 'Supplier not recorded'}
+                    {movement.supplier_reference ? ` · Supplier Ref: ${movement.supplier_reference}` : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 sm:justify-end">
+                  <span className="text-sm font-bold text-emerald-700">+{movement.quantity}</span>
+                  {movement.receipt_path && (
+                    <a
+                      href={movement.receipt_path}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#CFE0D7] bg-white px-2.5 py-1.5 text-[10px] font-bold text-[#0D7740] transition hover:bg-[#EEF8F2]"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View Receipt
+                    </a>
+                  )}
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </section>
   </div>
@@ -8452,6 +11629,30 @@ setNewProduct({
 
       <div>
         <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">
+          Typical Lead Time (days)
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="365"
+          step="1"
+          value={editSupplierData.lead_time_days}
+          onChange={(e) =>
+            setEditSupplierData({
+              ...editSupplierData,
+              lead_time_days: e.target.value
+            })
+          }
+          placeholder="e.g. 5"
+          className="w-full px-3 py-2 text-xs rounded-lg border border-steel-200 bg-white text-steel-950 focus:outline-none focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500"
+        />
+        <p className="mt-1 text-[10px] text-steel-500">
+          Used by Reorder Suggestions. Leave blank until the supplier's normal delivery time is known.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">
           Address
         </label>
 
@@ -8582,6 +11783,30 @@ setNewProduct({
 
     <div>
       <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">
+        Typical Lead Time (days)
+      </label>
+      <input
+        type="number"
+        min="0"
+        max="365"
+        step="1"
+        value={newSupplier.lead_time_days}
+        onChange={(e) =>
+          setNewSupplier({
+            ...newSupplier,
+            lead_time_days: e.target.value
+          })
+        }
+        placeholder="Optional, e.g. 5"
+        className="w-full px-3 py-2 text-xs rounded-lg border border-steel-200 bg-white text-steel-950 focus:outline-none focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500"
+      />
+      <p className="mt-1 text-[10px] text-steel-500">
+        Reorder Suggestions use this to estimate demand while waiting for delivery.
+      </p>
+    </div>
+
+    <div>
+      <label className="block text-xs font-bold text-steel-500 uppercase tracking-wider mb-1">
         Address
       </label>
 
@@ -8703,6 +11928,12 @@ setNewProduct({
                 <p className="text-xs text-steel-500">
                   Address: {supplier.address || 'Not provided'}
                 </p>
+
+                <p className="text-xs text-steel-500">
+                  Lead Time: {supplier.lead_time_days === null || supplier.lead_time_days === undefined
+                    ? 'Not set'
+                    : `${supplier.lead_time_days} day(s)`}
+                </p>
               </div>
 
 <div className="flex items-center gap-3">
@@ -8750,14 +11981,30 @@ setNewProduct({
   </div>
 )}
 
+{/* CASHIER SHIFT & CASH RECONCILIATION */}
+{activeTab === 'cashierShift' && (
+  <CashierShiftPanel onGoToPos={() => setActiveTab('pos')} />
+)}
+
+{/* EXPENSE MANAGEMENT & ESTIMATED NET PROFIT */}
+{activeTab === 'expenses' && (
+  <ExpenseManagementPanel />
+)}
+
 {/* TAB 4: POS COUNTER */}
 {activeTab === 'pos' && (
-          <div className="space-y-6 animate-fade-up">
-            <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12 lg:items-stretch">
+          <div className="space-y-5 animate-fade-up">
+            <div>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Counter Operations</p>
+              <h2 className="mt-1 font-display text-2xl font-extrabold text-[#17372D]">POS / New Sale</h2>
+              <p className="mt-1 text-xs text-[#71817A]">Scan a barcode or browse products manually, then complete the existing cash-counter workflow.</p>
+            </div>
+            <CashierShiftStatusBanner onManageShift={() => setActiveTab('cashierShift')} />
+            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12 lg:items-stretch">
   {/* Product picker */}
   <div
   ref={posProductPanelRef}
-  className="lg:col-span-7 flex min-h-[500px] min-w-0 flex-col gap-4 rounded-2xl border border-steel-200/60 bg-white p-5 shadow-sm"
+  className="lg:col-span-7 flex min-h-[580px] min-w-0 flex-col gap-4 rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm"
 >
               {/* Barcode Scanner */}
 <div className="bg-[#F5F7F5] border border-[#DDE6E0] rounded-xl p-4">
@@ -8861,6 +12108,11 @@ setNewProduct({
                       <div>
                         <h5 className="text-xs font-bold text-steel-800 line-clamp-1">{p.name}</h5>
                         <p className="text-[10px] font-bold text-construction-600 mt-0.5">₱{Number(p.price).toFixed(2)}</p>
+                        {p.fulfillment_rule === 'delivery_only' && (
+                          <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-amber-800">
+                            Delivery Only
+                          </span>
+                        )}
                         <span className="text-[9px] text-steel-500 mt-1 block">In Stock: {p.stock}</span>
                       </div>
                     </button>
@@ -8956,6 +12208,11 @@ setNewProduct({
                         <div key={item.product.id} className="flex justify-between items-center border-b border-steel-100 pb-2.5 last:border-0 last:pb-0">
                           <div>
                             <h5 className="text-xs font-semibold text-steel-800 leading-tight">{item.product.name}</h5>
+                            {(products.find((product) => product.id === item.product.id)?.fulfillment_rule || item.product.fulfillment_rule) === 'delivery_only' && (
+                              <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-amber-800">
+                                Delivery Only
+                              </span>
+                            )}
                             <span className="text-[10px] text-steel-400 font-medium mt-0.5 block">
                               ₱{Number(item.product.price).toFixed(2)} x {item.quantity}
                             </span>
@@ -8969,7 +12226,40 @@ setNewProduct({
                             >
                               -
                             </button>
-                            <span className="text-xs font-bold text-steel-800 w-5 text-center">{item.quantity}</span>
+                            <input
+  type="number"
+  min={1}
+  max={item.product.stock}
+  step={1}
+  inputMode="numeric"
+  value={item.quantity}
+  onFocus={(e) =>
+    e.currentTarget.select()
+  }
+  onChange={(e) =>
+    handleSetPosQty(
+      item.product.id,
+      e.target.value
+    )
+  }
+  onKeyDown={(e) => {
+    if (
+      [
+        '-',
+        '+',
+        '.',
+        'e',
+        'E',
+      ].includes(e.key)
+    ) {
+      e.preventDefault();
+    }
+  }}
+  title={`Available stock: ${item.product.stock}`}
+  aria-label={`Quantity for ${item.product.name}`}
+  className="h-6 w-10 rounded border border-steel-200 bg-white px-1 text-center text-xs font-bold text-steel-800 outline-none transition focus:border-construction-500 focus:ring-2 focus:ring-construction-500/20 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+/>
+
                             <button
                               type="button"
                               onClick={() => handleUpdatePosQty(item.product.id, 1)}
@@ -8993,9 +12283,18 @@ onChange={(e) =>
   )
 }                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-steel-200 bg-white text-steel-950 focus:outline-none focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500"
                         >
-                          <option value="pickup">Store Counter Pickup</option>
+                          <option value="pickup" disabled={posCartRequiresDelivery}>
+                            {posCartRequiresDelivery
+                              ? 'Store Counter Pickup — unavailable for this cart'
+                              : 'Store Counter Pickup'}
+                          </option>
                           <option value="delivery">Deliver Out</option>
                         </select>
+                        {posCartRequiresDelivery && (
+                          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-relaxed text-amber-800">
+                            <strong>Delivery required.</strong> This POS cart contains a Delivery-only product, so the sale must use Deliver Out.
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -9003,7 +12302,7 @@ onChange={(e) =>
                       <div className="space-y-3 rounded-xl border border-[#CDE4D6] bg-[#F3FAF6] p-4">
                         <div>
                           <h4 className="text-xs font-bold text-[#17372D]">Deliver Out Details</h4>
-                          <p className="mt-1 text-[10px] text-[#71817A]">Required for an Admin-created delivery sale within Initao.</p>
+                          <p className="mt-1 text-[10px] text-[#71817A]">Required for an Admin-created delivery sale within a configured area of Initao, Libertad, Naawan, or Gitagum.</p>
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {[
@@ -9022,14 +12321,37 @@ onChange={(e) =>
                             </label>
                           ))}
                           <label className="text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
-                            Barangay *
+                            Municipality *
                             <select
-                              required value={posDeliveryDetails.barangay}
-                              onChange={(event) => setPosDeliveryDetails((current) => ({ ...current, barangay: event.target.value, delivery_fee: '' }))}
+                              required
+                              value={posDeliveryDetails.municipality}
+                              onChange={(event) =>
+                                setPosDeliveryDetails((current) => ({
+                                  ...current,
+                                  municipality: event.target.value,
+                                  barangay: '',
+                                  delivery_fee: '',
+                                }))
+                              }
                               className="mt-1 w-full rounded-lg border border-[#DDE6E0] bg-white px-3 py-2 text-xs normal-case tracking-normal focus:border-[#2F7D5A] focus:outline-none"
                             >
-                              <option value="">Select Initao barangay</option>
-                              {deliveryRateSettings.filter((rate) => rate.is_active).map((rate) => (
+                              <option value="">Select municipality</option>
+                              {deliveryAreas.municipalities.map((municipality) => (
+                                <option key={municipality} value={municipality}>{municipality}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-[#52635B]">
+                            Barangay *
+                            <select
+                              required
+                              disabled={!posDeliveryDetails.municipality}
+                              value={posDeliveryDetails.barangay}
+                              onChange={(event) => setPosDeliveryDetails((current) => ({ ...current, barangay: event.target.value, delivery_fee: '' }))}
+                              className="mt-1 w-full rounded-lg border border-[#DDE6E0] bg-white px-3 py-2 text-xs normal-case tracking-normal focus:border-[#2F7D5A] focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                            >
+                              <option value="">Select active barangay</option>
+                              {posAvailableBarangays.map((rate) => (
                                 <option key={rate.id} value={rate.barangay}>{rate.barangay}</option>
                               ))}
                             </select>
@@ -9270,6 +12592,15 @@ onChange={(e) =>
           </div>
         )}
 
+{/* TAB: RETURNS / REFUNDS / SALES VOIDS */}
+{activeTab === 'saleAdjustments' && (
+  <SalesAdjustmentPanel
+    onChanged={async () => {
+      await Promise.all([fetchSalesHistory(), fetchProducts(), fetchInventoryMovements()]);
+    }}
+  />
+)}
+
 {/* TAB: SALES HISTORY */}
 {activeTab === 'sales' && (
   <div className="space-y-5 animate-fade-up">
@@ -9280,8 +12611,7 @@ onChange={(e) =>
       </h2>
 
       <p className="text-sm text-steel-500">
-        Review completed sales and verify source, revenue, cost, gross profit,
-        payment method, and transaction status.
+        Review completed sales with discounts, merchandise revenue, service/delivery fees, COGS, gross profit, and gross margin separated correctly.
       </p>
     </div>
 
@@ -9404,185 +12734,130 @@ onChange={(e) =>
   </div>
 </div>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      {[
+        ['Transactions', filteredSalesSummary.total_sales.toLocaleString()],
+        ['Gross Merchandise', formatPeso(filteredSalesSummary.total_gross_merchandise_sales)],
+        ['Discounts', formatPeso(filteredSalesSummary.total_discounts)],
+        ['Returns / Refunds', formatPeso(filteredSalesSummary.total_refunds)],
+        ['Net Merchandise Sales', formatPeso(filteredSalesSummary.total_net_merchandise_sales)],
+        ['Service / Delivery Revenue', formatPeso(filteredSalesSummary.total_fee_revenue)],
+        ['Total Revenue', formatPeso(filteredSalesSummary.total_revenue)],
+        ['COGS', formatPeso(filteredSalesSummary.total_cogs)],
+        ['Gross Profit', formatPeso(filteredSalesSummary.total_gross_profit)],
+        ['Gross Profit Margin', `${Number(filteredSalesSummary.total_gross_profit_margin || 0).toFixed(2)}%`],
+      ].map(([label, value]) => (
+        <div key={label} className="rounded-2xl border border-steel-200/60 bg-white p-4 shadow-sm">
+          <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-steel-500">
+            {label}
+          </span>
+          <h3 className="mt-1 text-xl font-bold font-display text-steel-950">
+            {value}
+          </h3>
+        </div>
+      ))}
+    </div>
 
-      {/* Total Sales */}
-      <div className="bg-white border border-steel-200/60 p-4 rounded-2xl shadow-sm">
-        <ShoppingCart className="w-5 h-5 text-green-500 mb-2" />
-
-        <span className="text-xs font-semibold text-steel-500">
-          Total Sales
-        </span>
-
-        <h3 className="text-2xl font-bold font-display text-steel-950 mt-0.5">
-          {filteredSalesSummary.total_sales}
-        </h3>
-      </div>
-
-      {/* Revenue */}
-      <div className="bg-white border border-steel-200/60 p-4 rounded-2xl shadow-sm">
-        <TrendingUp className="w-5 h-5 text-[#2F7D5A] mb-2" />
-
-        <span className="text-xs font-semibold text-steel-500">
-          Total Revenue
-        </span>
-
-        <h3 className="text-2xl font-bold font-display text-steel-950 mt-0.5">
-          ₱{Number(filteredSalesSummary.total_revenue).toFixed(2)}
-        </h3>
-      </div>
-
-      {/* COGS */}
-      <div className="bg-white border border-steel-200/60 p-4 rounded-2xl shadow-sm">
-        <Package className="w-5 h-5 text-yellow-500 mb-2" />
-
-        <span className="text-xs font-semibold text-steel-500">
-          COGS
-        </span>
-
-        <h3 className="text-2xl font-bold font-display text-steel-950 mt-0.5">
-          ₱{Number(filteredSalesSummary.total_cogs).toFixed(2)}
-        </h3>
-      </div>
-
-      {/* Gross Profit */}
-      <div className="bg-white border border-steel-200/60 p-4 rounded-2xl shadow-sm">
-        <CheckCircle className="w-5 h-5 text-green-600 mb-2" />
-
-        <span className="text-xs font-semibold text-steel-500">
-          Gross Profit
-        </span>
-
-        <h3 className="text-2xl font-bold font-display text-steel-950 mt-0.5">
-          ₱{Number(filteredSalesSummary.total_gross_profit).toFixed(2)}
-        </h3>
-      </div>
-
+    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-[11px] leading-5 text-[#416056]">
+      <strong className="text-[#17372D]">Phase 4 adjusted-sale definition:</strong>{' '}
+      Recorded returns/voids reduce merchandise or fee revenue. COGS is reversed only for items actually restocked at their original sale cost. Non-restockable returns remain a business loss.
     </div>
 
 {/* Sales Transaction History */}
-<div className="bg-white border border-steel-200/60 rounded-2xl shadow-sm overflow-hidden">
-
-  <div className="px-5 py-4 border-b border-steel-100">
-    <h3 className="text-sm font-bold font-display text-steel-900">
-      Completed Sales Transactions
-    </h3>
-
-    <p className="text-xs text-steel-500 mt-1">
-      Recorded Online Order and Onsite POS sales.
-    </p>
+<div className="overflow-hidden rounded-2xl border border-steel-200/60 bg-white shadow-sm">
+  <div className="flex flex-col gap-3 border-b border-steel-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <h3 className="text-sm font-bold font-display text-steel-900">Completed Sales Transactions</h3>
+      <p className="mt-1 text-xs text-steel-500">Compact view prioritizes the fields used most often. Full financial details remain one click away.</p>
+    </div>
+    <div className="inline-flex w-fit rounded-xl border border-[#DDE6E0] bg-[#F6F9F7] p-1" role="group" aria-label="Sales table view">
+      <button type="button" onClick={() => setSalesTableView('compact')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${salesTableView === 'compact' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Compact</button>
+      <button type="button" onClick={() => setSalesTableView('full')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${salesTableView === 'full' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Full Columns</button>
+    </div>
   </div>
 
   {filteredSalesHistory.length === 0 ? (
-    <div className="text-center py-12 text-steel-500">
-      <ShoppingCart className="w-10 h-10 mx-auto mb-2 text-steel-300" />
-
-      <p className="text-xs">
-  {salesSearch.trim()
-  ? 'No completed sales match your search and selected date period.'
-  : salesDatePreset === 'all'
-    ? 'No completed sales recorded yet.'
-    : 'No completed sales found for the selected date period.'}
-</p>
-
+    <div className="py-12 text-center text-steel-500">
+      <ShoppingCart className="mx-auto mb-2 h-10 w-10 text-steel-300" />
+      <p className="text-xs">{salesSearch.trim() ? 'No completed sales match your search and selected date period.' : salesDatePreset === 'all' ? 'No completed sales recorded yet.' : 'No completed sales found for the selected date period.'}</p>
     </div>
-  ) : (
+  ) : salesTableView === 'compact' ? (
     <div className="overflow-x-auto">
-
-      <table className="w-full text-xs">
-
-        <thead className="bg-steel-50 border-b border-steel-200">
-          <tr className="text-left text-steel-500 uppercase tracking-wider">
-
-            <th className="px-4 py-3">Date</th>
-<th className="px-4 py-3">Reference</th>
-<th className="px-4 py-3">Products / Items</th>
-<th className="px-4 py-3">Source</th>
-<th className="px-4 py-3">Items</th>
-            <th className="px-4 py-3">Quantity</th>
-            <th className="px-4 py-3">Revenue</th>
-            <th className="px-4 py-3">Cost</th>
-            <th className="px-4 py-3">Gross Profit</th>
-            <th className="px-4 py-3">Payment Method</th>
-            <th className="px-4 py-3">Status</th>
-
+      <table className="w-full min-w-[940px] text-left text-[11px]">
+        <thead className="sticky top-0 z-10 border-b border-steel-200 bg-[#F7FAF8] text-[8px] uppercase tracking-[0.1em] text-[#71817A]">
+          <tr>
+            <th className="px-4 py-3">Date / Reference</th>
+            <th className="px-4 py-3">Products / Items</th>
+            <th className="px-3 py-3">Source</th>
+            <th className="px-3 py-3 text-right">Qty</th>
+            <th className="px-3 py-3 text-right">Net Merchandise</th>
+            <th className="px-3 py-3 text-right">Total Revenue</th>
+            <th className="px-3 py-3 text-right">Gross Profit / Margin</th>
+            <th className="px-3 py-3">State</th>
+            <th className="px-4 py-3 text-right">Details</th>
           </tr>
         </thead>
-
-        <tbody>
+        <tbody className="divide-y divide-steel-100">
           {filteredSalesHistory.map((sale) => (
-            <tr
-              key={sale.sale_id}
-              className="border-b border-steel-100 last:border-0 hover:bg-steel-50/50"
-            >
-
-              <td className="px-4 py-3 whitespace-nowrap text-steel-500">
-  {new Date(sale.sale_date).toLocaleString()}
-</td>
-
-<td className="px-4 py-3 font-semibold text-steel-800 whitespace-nowrap">
-  {sale.reference}
-</td>
-
-<td className="px-4 py-3 text-steel-700 min-w-[220px]">
-  {sale.items_summary || '—'}
-</td>
-
-<td className="px-4 py-3">
-                <span
-                  className={`px-2 py-1 rounded-full text-[10px] font-bold ${
-                    sale.source_label === 'POS'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : 'bg-green-50 text-green-700 border border-green-200'
-                  }`}
-                >
-                  {sale.source_label}
-                </span>
+            <tr key={sale.sale_id} className="hover:bg-[#FAFCFB]">
+              <td className="px-4 py-3 align-top">
+                <p className="whitespace-nowrap font-semibold text-steel-600">{new Date(sale.sale_date).toLocaleString()}</p>
+                <p className="mt-1 whitespace-nowrap font-extrabold text-[#17372D]">{sale.reference}</p>
               </td>
-
-              <td className="px-4 py-3 text-steel-700">
-                {sale.item_count}
+              <td className="max-w-[290px] px-4 py-3 align-top">
+                <p className="line-clamp-2 font-semibold leading-5 text-steel-700">{sale.items_summary || '—'}</p>
+                <p className="mt-1 text-[9px] text-steel-400">{sale.item_count} line item{sale.item_count === 1 ? '' : 's'}</p>
               </td>
-
-              <td className="px-4 py-3 font-bold text-steel-800">
-                {sale.total_quantity}
-              </td>
-
-              <td className="px-4 py-3 font-semibold text-steel-800 whitespace-nowrap">
-                ₱{Number(sale.revenue).toFixed(2)}
-              </td>
-
-              <td className="px-4 py-3 text-steel-700 whitespace-nowrap">
-                ₱{Number(sale.cogs).toFixed(2)}
-              </td>
-
-              <td className="px-4 py-3 font-bold text-green-700 whitespace-nowrap">
-                ₱{Number(sale.gross_profit).toFixed(2)}
-              </td>
-
-              <td className="px-4 py-3">
-                <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-50 text-green-700 border border-green-200">
-                  {formatPaymentMethod(sale.payment_method || 'cash')}
-                </span>
-              </td>
-
-              <td className="px-4 py-3">
-                <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-50 text-green-700 border border-green-200">
-                  {sale.payment_status}
-                </span>
-              </td>
-
+              <td className="px-3 py-3 align-top"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-bold ${sale.source_label === 'POS' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-green-200 bg-green-50 text-green-700'}`}>{sale.source_label}</span></td>
+              <td className="px-3 py-3 text-right align-top font-extrabold tabular-nums text-steel-800">{sale.net_quantity ?? sale.total_quantity}{sale.returned_quantity > 0 && <span className="mt-1 block text-[8px] font-semibold text-amber-600">{sale.returned_quantity} returned</span>}</td>
+              <td className="px-3 py-3 text-right align-top font-bold tabular-nums text-steel-800">{formatPeso(sale.net_merchandise_sales)}</td>
+              <td className="px-3 py-3 text-right align-top font-bold tabular-nums text-[#17372D]">{formatPeso(sale.total_revenue)}</td>
+              <td className="px-3 py-3 text-right align-top"><p className="font-extrabold tabular-nums text-green-700">{formatPeso(sale.gross_profit)}</p><p className="mt-1 text-[9px] font-bold tabular-nums text-green-700">{Number(sale.gross_profit_margin || 0).toFixed(2)}%</p></td>
+              <td className="px-3 py-3 align-top"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-bold ${sale.adjustment_state === 'Voided' ? 'border-red-200 bg-red-50 text-red-700' : sale.adjustment_state === 'Adjusted' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-green-200 bg-green-50 text-green-700'}`}>{sale.adjustment_state || 'Completed'}</span></td>
+              <td className="px-4 py-3 text-right align-top"><button type="button" onClick={() => setSelectedSaleHistory(sale)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#CFE0D7] bg-white px-2.5 py-1.5 text-[9px] font-extrabold text-[#0D7740] hover:bg-emerald-50"><Eye className="h-3.5 w-3.5" />View</button></td>
             </tr>
           ))}
         </tbody>
-
       </table>
-
+    </div>
+  ) : (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="border-b border-steel-200 bg-steel-50">
+          <tr className="text-left uppercase tracking-wider text-steel-500">
+            <th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Products / Items</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Items</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Gross Merchandise</th><th className="px-4 py-3">Discount</th><th className="px-4 py-3">Refunds</th><th className="px-4 py-3">Net Merchandise</th><th className="px-4 py-3">Service / Delivery</th><th className="px-4 py-3">Total Revenue</th><th className="px-4 py-3">COGS</th><th className="px-4 py-3">Gross Profit</th><th className="px-4 py-3">Gross Margin</th><th className="px-4 py-3">Payment Method</th><th className="px-4 py-3">Sale State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredSalesHistory.map((sale) => (
+            <tr key={sale.sale_id} className="border-b border-steel-100 last:border-0 hover:bg-steel-50/50">
+              <td className="whitespace-nowrap px-4 py-3 text-steel-500">{new Date(sale.sale_date).toLocaleString()}</td><td className="whitespace-nowrap px-4 py-3 font-semibold text-steel-800">{sale.reference}</td><td className="min-w-[220px] px-4 py-3 text-steel-700">{sale.items_summary || '—'}</td><td className="px-4 py-3"><span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${sale.source_label === 'POS' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-green-200 bg-green-50 text-green-700'}`}>{sale.source_label}</span></td><td className="px-4 py-3">{sale.item_count}</td><td className="whitespace-nowrap px-4 py-3 font-bold">{sale.net_quantity ?? sale.total_quantity}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.gross_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3 text-amber-700">{formatPeso(sale.discount_amount)}</td><td className="whitespace-nowrap px-4 py-3 text-red-700">{formatPeso(sale.total_refunds)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.net_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.fee_revenue)}</td><td className="whitespace-nowrap px-4 py-3 font-semibold">{formatPeso(sale.total_revenue)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.cogs)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{formatPeso(sale.gross_profit)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{Number(sale.gross_profit_margin || 0).toFixed(2)}%</td><td className="px-4 py-3">{formatPaymentMethod(sale.payment_method || 'cash')}</td><td className="px-4 py-3">{sale.adjustment_state || 'Completed'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )}
-
 </div>
 
+{selectedSaleHistory && (
+  <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="sale-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedSaleHistory(null); }}>
+    <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
+      <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
+        <div><p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Sale Details</p><h3 id="sale-detail-title" className="mt-1 font-display text-lg font-extrabold text-[#17372D]">{selectedSaleHistory.reference}</h3><p className="mt-1 text-[10px] text-[#71817A]">{new Date(selectedSaleHistory.sale_date).toLocaleString()}</p></div>
+        <button type="button" onClick={() => setSelectedSaleHistory(null)} className="rounded-xl border border-[#DDE6E0] p-2 text-[#52635B] hover:bg-[#F5F8F6]" aria-label="Close sale details"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="space-y-4 p-5">
+        <div className="rounded-2xl border border-[#E5ECE8] bg-[#FAFCFB] p-4"><p className="text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#71817A]">Products / Items</p><p className="mt-2 text-sm font-semibold leading-6 text-[#34463F]">{selectedSaleHistory.items_summary || '—'}</p></div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            ['Source', selectedSaleHistory.source_label], ['Payment Method', formatPaymentMethod(selectedSaleHistory.payment_method || 'cash')], ['Sale State', selectedSaleHistory.adjustment_state || 'Completed'], ['Gross Merchandise', formatPeso(selectedSaleHistory.gross_merchandise_sales)], ['Discount', formatPeso(selectedSaleHistory.discount_amount)], ['Returns / Refunds', formatPeso(selectedSaleHistory.total_refunds)], ['Net Merchandise Sales', formatPeso(selectedSaleHistory.net_merchandise_sales)], ['Service / Delivery Revenue', formatPeso(selectedSaleHistory.fee_revenue)], ['Total Revenue', formatPeso(selectedSaleHistory.total_revenue)], ['COGS', formatPeso(selectedSaleHistory.cogs)], ['Gross Profit', formatPeso(selectedSaleHistory.gross_profit)], ['Gross Profit Margin', `${Number(selectedSaleHistory.gross_profit_margin || 0).toFixed(2)}%`], ['Original COGS', formatPeso(selectedSaleHistory.original_cogs)], ['COGS Reversed', formatPeso(selectedSaleHistory.cogs_reversed)], ['Returned Quantity', selectedSaleHistory.returned_quantity.toLocaleString()],
+          ].map(([label, value]) => <div key={label} className="rounded-xl border border-[#E5ECE8] bg-white p-3"><p className="text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#7A8E85]">{label}</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#17372D]">{value}</p></div>)}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
   </div>
 )}
 
@@ -9596,14 +12871,14 @@ onChange={(e) =>
       </h2>
 
       <p className="text-sm text-steel-500">
-        Review all recorded Stock-In and Stock-Out transactions.
+        Centralized audit trail for all Stock-In and Stock-Out transactions, supplier references, and supporting receipts.
       </p>
     </div>
 
     {/* Movement Filters */}
 <div className="bg-white border border-[#DDE6E0] rounded-2xl p-4 shadow-sm">
 
-  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
 
     {/* Search */}
     <div className="relative xl:col-span-2">
@@ -9622,30 +12897,43 @@ onChange={(e) =>
       />
     </div>
 
-    {/* Type */}
+    {/* Movement Type */}
+    <div className="flex rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-1">
+      {([
+        ['all', 'All'],
+        ['Stock-In', 'Stock-In'],
+        ['Stock-Out', 'Stock-Out'],
+      ] as const).map(([value, label]) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => setMovementTypeFilter(value)}
+          className={`flex-1 rounded-lg px-2.5 py-2 text-[11px] font-bold transition ${
+            movementTypeFilter === value
+              ? 'bg-[#17372D] text-white shadow-sm'
+              : 'text-[#61766D] hover:bg-white hover:text-[#17372D]'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+
+    {/* Source */}
     <select
-      value={movementTypeFilter}
-      onChange={(e) =>
-        setMovementTypeFilter(
-          e.target.value as
-            | 'all'
-            | 'Stock-In'
-            | 'Stock-Out'
-        )
-      }
+      value={movementSourceFilter}
+      onChange={(e) => setMovementSourceFilter(e.target.value)}
       className="w-full px-3 py-2.5 text-sm rounded-xl border border-[#DDE6E0] bg-white text-[#34463F] focus:outline-none focus:ring-2 focus:ring-[#2F7D5A]/20 focus:border-[#2F7D5A]"
     >
-      <option value="all">
-        All Movements
-      </option>
-
-      <option value="Stock-In">
-        Stock In
-      </option>
-
-      <option value="Stock-Out">
-        Stock Out
-      </option>
+      <option value="all">All Sources</option>
+      <option value="Opening Inventory">Opening Inventory</option>
+      <option value="Stock Receiving">Stock Receiving</option>
+      <option value="Sales Return">Sales Return</option>
+      <option value="Sale Void Reversal">Sale Void Reversal</option>
+      <option value="POS">POS</option>
+      <option value="Pickup">Pickup</option>
+      <option value="Shop & Go">Shop &amp; Go</option>
+      <option value="Delivery">Delivery</option>
     </select>
 
     {/* Category */}
@@ -9729,133 +13017,84 @@ onChange={(e) =>
 
 </div>
 
-    <div className="bg-white border border-steel-200/60 rounded-2xl shadow-sm overflow-hidden">
+    <div className="overflow-hidden rounded-2xl border border-steel-200/60 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-steel-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-bold font-display text-steel-900">Movement Records</h3>
+          <p className="mt-1 text-xs text-steel-500">Compact view combines related fields while keeping every original movement detail available.</p>
+        </div>
+        <div className="inline-flex w-fit rounded-xl border border-[#DDE6E0] bg-[#F6F9F7] p-1" role="group" aria-label="Inventory movement table view">
+          <button type="button" onClick={() => setMovementTableView('compact')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${movementTableView === 'compact' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Compact</button>
+          <button type="button" onClick={() => setMovementTableView('full')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${movementTableView === 'full' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Full Columns</button>
+        </div>
+      </div>
 
       {filteredInventoryMovements.length === 0 ? (
-        <div className="text-center py-12 text-steel-500">
-          <ArrowLeftRight className="w-10 h-10 mx-auto mb-2 text-steel-300" />
-          <p className="text-xs">
-  {inventoryMovements.length === 0
-    ? 'No inventory movements recorded yet.'
-    : 'No inventory movements match the selected filters.'}
-</p>
-
+        <div className="py-12 text-center text-steel-500"><ArrowLeftRight className="mx-auto mb-2 h-10 w-10 text-steel-300" /><p className="text-xs">{inventoryMovements.length === 0 ? 'No inventory movements recorded yet.' : 'No inventory movements match the selected filters.'}</p></div>
+      ) : movementTableView === 'compact' ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-left text-[11px]">
+            <thead className="sticky top-0 z-10 border-b border-steel-200 bg-[#F7FAF8] text-[8px] uppercase tracking-[0.1em] text-[#71817A]">
+              <tr><th className="px-4 py-3">Date / Reference</th><th className="px-4 py-3">Product</th><th className="px-3 py-3">Movement</th><th className="px-3 py-3">Source</th><th className="px-3 py-3">Supplier</th><th className="px-3 py-3 text-right">Cost / Unit</th><th className="px-3 py-3">Recorded By</th><th className="px-4 py-3 text-right">Details</th></tr>
+            </thead>
+            <tbody className="divide-y divide-steel-100">
+              {filteredInventoryMovements.map((movement) => (
+                <tr key={movement.movement_id} className="hover:bg-[#FAFCFB]">
+                  <td className="px-4 py-3 align-top"><p className="whitespace-nowrap font-semibold text-steel-600">{new Date(movement.movement_date).toLocaleString()}</p><p className="mt-1 whitespace-nowrap font-extrabold text-[#0D7740]">{movement.reference_label || '—'}</p></td>
+                  <td className="max-w-[260px] px-4 py-3 align-top"><p className="line-clamp-2 font-extrabold leading-5 text-[#17372D]">{movement.product_name}</p><p className="mt-1 text-[8px] text-[#8A9992]">{movement.category || 'Uncategorized'}{movement.barcode ? ` · ${movement.barcode}` : ''}</p></td>
+                  <td className="px-3 py-3 align-top"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-bold ${movement.movement_type === 'Stock-In' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>{movement.movement_type === 'Stock-In' ? '+' : '-'}{movement.quantity} {movement.movement_type}</span></td>
+                  <td className="px-3 py-3 align-top"><span className="inline-flex rounded-full border border-[#DDE6E0] bg-[#F7FAF8] px-2 py-1 text-[9px] font-bold text-[#52645D]">{movement.source_label || 'Inventory Movement'}</span></td>
+                  <td className="px-3 py-3 align-top text-steel-600">{movement.supplier_name || '—'}</td>
+                  <td className="px-3 py-3 text-right align-top font-bold tabular-nums text-steel-700">{formatPeso(Number(movement.supplier_price || 0))}</td>
+                  <td className="px-3 py-3 align-top text-steel-600">{movement.recorded_by?.trim() || `Admin #${movement.admin_id}`}</td>
+                  <td className="px-4 py-3 text-right align-top"><button type="button" onClick={() => setSelectedMovementHistory(movement)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#CFE0D7] bg-white px-2.5 py-1.5 text-[9px] font-extrabold text-[#0D7740] hover:bg-emerald-50"><Eye className="h-3.5 w-3.5" />View</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-
-            <thead className="bg-steel-50 border-b border-steel-200">
-              <tr className="text-left text-steel-500 uppercase tracking-wider">
-
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Product</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Qty</th>
-                <th className="px-4 py-3">Source</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">Cost / Unit</th>
-                <th className="px-4 py-3">Selling Price</th>
-                <th className="px-4 py-3">Reference</th>
-                <th className="px-4 py-3">Remarks</th>
-                <th className="px-4 py-3">Recorded By</th>
-
-              </tr>
-            </thead>
-
+            <thead className="border-b border-steel-200 bg-steel-50"><tr className="text-left uppercase tracking-wider text-steel-500"><th className="px-4 py-3">Date</th><th className="px-4 py-3">Product</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Qty</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Supplier</th><th className="px-4 py-3">Cost / Unit</th><th className="px-4 py-3">Selling Price</th><th className="px-4 py-3">System Reference</th><th className="px-4 py-3">Supplier Reference</th><th className="px-4 py-3">Receipt</th><th className="px-4 py-3">Remarks</th><th className="px-4 py-3">Recorded By</th></tr></thead>
             <tbody>
               {filteredInventoryMovements.map((movement) => (
-                <tr
-                  key={movement.movement_id}
-                  className="border-b border-steel-100 last:border-0 hover:bg-steel-50/50"
-                >
-
-                  <td className="px-4 py-3 whitespace-nowrap text-steel-500">
-                    {new Date(movement.movement_date).toLocaleString()}
-                  </td>
-
-                  <td className="px-4 py-3 font-semibold text-steel-800">
-                    {movement.product_name}
-                  </td>
-
-                  <td className="px-4 py-3">
-  <span
-    className={`px-2 py-1 rounded-full text-[10px] font-bold ${
-      movement.movement_type === 'Stock-In'
-        ? 'bg-green-50 text-green-700 border border-green-200'
-        : 'bg-red-50 text-red-700 border border-red-200'
-    }`}
-  >
-    {movement.movement_type}
-  </span>
-</td>
-
-{/* Quantity */}
-<td className="px-4 py-3 whitespace-nowrap">
-  
-  <span
-    className={`font-bold ${
-      movement.movement_type === 'Stock-In'
-        ? 'text-green-700'
-        : 'text-red-600'
-    }`}
-  >
-    {movement.movement_type === 'Stock-In'
-      ? '+'
-      : '-'}
-    {movement.quantity}
-  </span>
-</td>
-
-{/* Source */}
-<td className="px-4 py-3 whitespace-nowrap">
-  <span className="text-xs font-semibold text-[#34463F]">
-    {movement.source_label || 'Inventory Movement'}
-  </span>
-</td>
-
-{/* Supplier */}
-<td className="px-4 py-3 text-steel-600">
-  {movement.supplier_name || '—'}
-</td>
-
-{/* Cost / Unit */}
-<td className="px-4 py-3 text-steel-700">
-  ₱{Number(movement.supplier_price).toFixed(2)}
-</td>
-
-{/* Selling Price */}
-<td className="px-4 py-3 text-steel-700">
-  ₱{Number(movement.selling_price).toFixed(2)}
-</td>
-
-{/* Reference */}
-<td className="px-4 py-3 text-steel-600 whitespace-nowrap">
-  <span className="font-semibold text-[#2F7D5A]">
-    {movement.reference_label || '—'}
-  </span>
-</td>
-
-{/* Remarks */}
-<td className="px-4 py-3 text-steel-500">
-  {movement.remarks || '—'}
-</td>
-
-{/* Recorded By */}
-<td className="px-4 py-3 whitespace-nowrap text-steel-600">
-  {movement.recorded_by?.trim() || `Admin #${movement.admin_id}`}
-</td>
-
+                <tr key={movement.movement_id} className="border-b border-steel-100 last:border-0 hover:bg-steel-50/50">
+                  <td className="whitespace-nowrap px-4 py-3 text-steel-500">{new Date(movement.movement_date).toLocaleString()}</td><td className="px-4 py-3 font-semibold text-steel-800">{movement.product_name}</td><td className="px-4 py-3">{movement.movement_type}</td><td className="whitespace-nowrap px-4 py-3 font-bold">{movement.movement_type === 'Stock-In' ? '+' : '-'}{movement.quantity}</td><td className="whitespace-nowrap px-4 py-3">{movement.source_label || 'Inventory Movement'}</td><td className="px-4 py-3">{movement.supplier_name || '—'}</td><td className="px-4 py-3">{formatPeso(Number(movement.supplier_price || 0))}</td><td className="px-4 py-3">{formatPeso(Number(movement.selling_price || 0))}</td><td className="whitespace-nowrap px-4 py-3 text-[#2F7D5A]">{movement.reference_label || '—'}</td><td className="whitespace-nowrap px-4 py-3">{movement.supplier_reference || '—'}</td><td className="px-4 py-3">{movement.receipt_path ? <a href={movement.receipt_path} target="_blank" rel="noreferrer" className="font-bold text-[#0D7740] hover:underline">View Receipt</a> : '—'}</td><td className="px-4 py-3">{movement.remarks || '—'}</td><td className="whitespace-nowrap px-4 py-3">{movement.recorded_by?.trim() || `Admin #${movement.admin_id}`}</td>
                 </tr>
               ))}
             </tbody>
-
           </table>
         </div>
       )}
     </div>
+
+    {selectedMovementHistory && (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedMovementHistory(null); }}>
+        <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
+            <div><p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Inventory Movement</p><h3 id="movement-detail-title" className="mt-1 font-display text-lg font-extrabold text-[#17372D]">{selectedMovementHistory.reference_label || `Movement #${selectedMovementHistory.movement_id}`}</h3><p className="mt-1 text-[10px] text-[#71817A]">{new Date(selectedMovementHistory.movement_date).toLocaleString()}</p></div>
+            <button type="button" onClick={() => setSelectedMovementHistory(null)} className="rounded-xl border border-[#DDE6E0] p-2 text-[#52635B] hover:bg-[#F5F8F6]" aria-label="Close movement details"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="space-y-4 p-5">
+            <div className="rounded-2xl border border-[#E5ECE8] bg-[#FAFCFB] p-4"><p className="text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#71817A]">Product</p><p className="mt-2 text-sm font-extrabold text-[#17372D]">{selectedMovementHistory.product_name}</p><p className="mt-1 text-[9px] text-[#8A9992]">{selectedMovementHistory.category || 'Uncategorized'}{selectedMovementHistory.barcode ? ` · ${selectedMovementHistory.barcode}` : ''}</p></div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                ['Movement', `${selectedMovementHistory.movement_type === 'Stock-In' ? '+' : '-'}${selectedMovementHistory.quantity} ${selectedMovementHistory.movement_type}`], ['Source', selectedMovementHistory.source_label || 'Inventory Movement'], ['Recorded By', selectedMovementHistory.recorded_by?.trim() || `Admin #${selectedMovementHistory.admin_id}`], ['Supplier', selectedMovementHistory.supplier_name || '—'], ['Cost / Unit', formatPeso(Number(selectedMovementHistory.supplier_price || 0))], ['Selling Price', formatPeso(Number(selectedMovementHistory.selling_price || 0))], ['Supplier Reference', selectedMovementHistory.supplier_reference || '—'], ['Movement Reason', selectedMovementHistory.movement_reason || '—'], ['Remarks', selectedMovementHistory.remarks || '—'],
+              ].map(([label, value]) => <div key={label} className="rounded-xl border border-[#E5ECE8] bg-white p-3"><p className="text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#7A8E85]">{label}</p><p className="mt-1 break-words text-sm font-extrabold tabular-nums text-[#17372D]">{value}</p></div>)}
+            </div>
+            {selectedMovementHistory.receipt_path && <a href={selectedMovementHistory.receipt_path} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-[#CFE0D7] bg-emerald-50 px-4 py-2.5 text-xs font-extrabold text-[#0D7740] hover:bg-emerald-100"><Eye className="h-4 w-4" />Open supporting receipt</a>}
+          </div>
+        </div>
+      </div>
+    )}
   </div>
 )}
+
+        {/* CENTRALIZED AUDIT LOGGING */}
+        {activeTab === 'auditLogs' && (
+          <AdminAuditLogPanel />
+        )}
 
         {/* REPORTS CENTER */}
         {activeTab === 'reports' && (
@@ -9918,8 +13157,9 @@ onChange={(e) =>
                 </div>
               </div>
 
-             <div className="grid grid-cols-1 gap-2 border-b border-[#E5ECE8] bg-[#F8FAF9] p-3 sm:grid-cols-2 xl:grid-cols-4">
+             <div className="grid grid-cols-1 gap-2 border-b border-[#E5ECE8] bg-[#F8FAF9] p-3 sm:grid-cols-2 xl:grid-cols-5">
   {([
+    ['management', 'Management Summary'],
     ['sales', 'Sales Report'],
     ['inventory', 'Inventory Report'],
     ['lowStock', 'Low Stock Report'],
@@ -9946,7 +13186,9 @@ onChange={(e) =>
 
               <div className="p-4 md:p-5">
                 <div className={`grid gap-3 ${
-  reportType === 'sales'
+  reportType === 'management'
+    ? 'grid-cols-1'
+    : reportType === 'sales'
     ? 'md:grid-cols-[minmax(0,1fr)_180px_180px]'
     : reportType === 'stockMovement'
       ? 'xl:grid-cols-[minmax(0,1fr)_170px_170px_170px]'
@@ -9963,8 +13205,10 @@ onChange={(e) =>
                         setReportGeneratedAt(new Date());
                       }}
                       placeholder={
-  reportType === 'sales'
-    ? 'Search reference, product, or sales source...'
+  reportType === 'management'
+    ? 'Management Summary is generated from current integrated records...'
+    : reportType === 'sales'
+      ? 'Search reference, product, or sales source...'
     : reportType === 'stockMovement'
       ? 'Search product, supplier, source, or reference...'
       : 'Search product, category, or supplier...'
@@ -9973,7 +13217,7 @@ onChange={(e) =>
                     />
                   </label>
 
-                  {reportType === 'sales' ? (
+                  {reportType === 'management' ? null : reportType === 'sales' ? (
   <>
     <label>
       <span className="sr-only">Start date</span>
@@ -10138,13 +13382,46 @@ onChange={(e) =>
 )}
                 </div>
 
+                {reportType === 'management' && (
+                  <div className="mt-4 space-y-3">
+                    {managementOverviewError && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+                        {managementOverviewError}
+                      </div>
+                    )}
+                    {managementOverviewReport && (
+                      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+                        {[
+                          ['Estimated Net Profit', formatPeso(managementOverviewReport.profitability.month.estimatedNetProfit)],
+                          ['Operating Expenses', formatPeso(managementOverviewReport.profitability.month.operatingExpenses)],
+                          ['Open POs', managementOverviewReport.purchasing.openPurchaseOrders.toLocaleString()],
+                          ['Need Reorder', managementOverviewReport.replenishment.needsReorder.toLocaleString()],
+                          ['Refunds Today', formatPeso(managementOverviewReport.saleAdjustmentsToday.refundAmount)],
+                          ['Cashier Shift', managementOverviewReport.cashier.hasOpenShift ? `Open #${managementOverviewReport.cashier.currentShift?.shiftId}` : 'Closed / None'],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-[#DDE6E0] bg-[#F8FAF9] p-4">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#7A8E85]">{label}</p>
+                            <p className="mt-2 text-base font-extrabold text-[#17372D]">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {reportType === 'sales' && (
-                  <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
                     {[
-                      ['Total Sales', reportSalesSummary.totalSales.toLocaleString()],
-                      ['Revenue', formatPeso(reportSalesSummary.revenue)],
-                      ['Cost', formatPeso(reportSalesSummary.cost)],
+                      ['Transactions', reportSalesSummary.totalSales.toLocaleString()],
+                      ['Gross Merchandise', formatPeso(reportSalesSummary.grossMerchandiseSales)],
+                      ['Discounts', formatPeso(reportSalesSummary.discounts)],
+                      ['Returns / Refunds', formatPeso(reportSalesSummary.refunds)],
+                      ['Net Merchandise Sales', formatPeso(reportSalesSummary.netMerchandiseSales)],
+                      ['Service / Delivery Revenue', formatPeso(reportSalesSummary.feeRevenue)],
+                      ['Total Revenue', formatPeso(reportSalesSummary.totalRevenue)],
+                      ['COGS', formatPeso(reportSalesSummary.cost)],
                       ['Gross Profit', formatPeso(reportSalesSummary.grossProfit)],
+                      ['Gross Margin', `${Number(reportSalesSummary.grossMargin || 0).toFixed(2)}%`],
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-xl border border-[#DDE6E0] bg-[#F8FAF9] p-4">
                         <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#7A8E85]">
@@ -10157,11 +13434,12 @@ onChange={(e) =>
                 )}
 
                 {reportType === 'inventory' && (
-                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {[
                       ['Products', reportInventorySummary.products.toLocaleString()],
                       ['Current Units', reportInventorySummary.units.toLocaleString()],
-                      ['Stock Value', formatPeso(reportInventorySummary.stockValue)],
+                      ['Inventory Cost Value', formatPeso(reportInventorySummary.inventoryCostValue)],
+                      ['Potential Retail Value', formatPeso(reportInventorySummary.retailValue)],
                     ].map(([label, value]) => (
                       <div key={label} className="rounded-xl border border-[#DDE6E0] bg-[#F8FAF9] p-4">
                         <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#7A8E85]">{label}</p>
@@ -10186,14 +13464,29 @@ onChange={(e) =>
                   </div>
                 )}
 
-                <div className="mt-5 overflow-x-auto rounded-xl border border-[#DDE6E0]">
-                  <table className="min-w-full border-collapse text-left">
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-[#71817A]">On-screen table</p>
+                    <p className="mt-1 text-[10px] text-[#8A9992]">Compact view reduces horizontal scrolling. Print and CSV always keep the complete report fields.</p>
+                  </div>
+                  <div className="inline-flex w-fit rounded-xl border border-[#DDE6E0] bg-[#F6F9F7] p-1" role="group" aria-label="Report table view">
+                    <button type="button" onClick={() => setReportTableView('compact')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${reportTableView === 'compact' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Compact</button>
+                    <button type="button" onClick={() => setReportTableView('full')} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${reportTableView === 'full' ? 'bg-white text-[#0D7740] shadow-sm' : 'text-[#71817A] hover:text-[#17372D]'}`}>Full Columns</button>
+                  </div>
+                </div>
+
+                <div className="mt-3 overflow-x-auto rounded-xl border border-[#DDE6E0]">
+                  <table className={`${reportTableView === 'compact' ? 'w-full' : 'min-w-full'} border-collapse text-left`}>
                     <thead className="bg-[#EEF5F1]">
                       <tr>
-                        {reportTableHeaders.map((header) => (
+                        {reportScreenHeaders.map((header) => (
                           <th
                             key={header}
-                            className="whitespace-nowrap px-4 py-3 text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#587067]"
+                            className={`px-4 py-3 text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#587067] ${
+                              reportType === 'sales'
+                                ? 'whitespace-normal leading-4'
+                                : 'whitespace-nowrap'
+                            }`}
                           >
                             {header}
                           </th>
@@ -10204,19 +13497,33 @@ onChange={(e) =>
                       {reportTableRows.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={reportTableHeaders.length}
+                            colSpan={reportScreenHeaders.length}
                             className="px-4 py-12 text-center text-xs text-[#7A8E85]"
                           >
                             No records match the selected filters.
                           </td>
                         </tr>
                       ) : (
-                        reportTableRows.map((row, rowIndex) => (
+                        reportScreenRows.map((row, rowIndex) => (
                           <tr key={`${reportType}-${rowIndex}`} className="hover:bg-[#F8FAF9]">
                             {row.map((value, columnIndex) => (
                               <td
                                 key={`${rowIndex}-${columnIndex}`}
-                                className="whitespace-nowrap px-4 py-3 text-[11px] font-medium text-[#40564D]"
+                                className={`px-4 py-3 text-[11px] font-medium text-[#40564D] ${
+                                  reportTableView === 'compact'
+                                    ? columnIndex === 1
+                                      ? 'max-w-[340px] whitespace-normal leading-4'
+                                      : [3, 4, 5, 6].includes(columnIndex)
+                                        ? 'whitespace-nowrap tabular-nums'
+                                        : 'whitespace-normal leading-4'
+                                    : reportType === 'sales'
+                                      ? columnIndex === 2
+                                        ? 'min-w-[220px] max-w-[340px] whitespace-normal leading-4'
+                                        : [4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(columnIndex)
+                                          ? 'whitespace-nowrap text-right tabular-nums'
+                                          : 'min-w-[110px] whitespace-normal leading-4'
+                                      : 'whitespace-nowrap'
+                                }`}
                               >
                                 {value}
                               </td>
@@ -10229,94 +13536,28 @@ onChange={(e) =>
                 </div>
 
                 <p className="mt-3 text-right text-[10px] font-medium text-[#7A8E85]">
-                  Showing {reportTableRows.length.toLocaleString()} record{reportTableRows.length === 1 ? '' : 's'}
+                  Showing {reportScreenRows.length.toLocaleString()} record{reportScreenRows.length === 1 ? '' : 's'}
                 </p>
               </div>
             </div>
           </section>
         )}
 
-        <footer className="-mx-4 mt-8 bg-[#0B4B2B] text-white md:-mx-6 lg:-mx-6 xl:-mx-8">
-          <div className="grid gap-8 px-6 py-9 sm:grid-cols-2 xl:grid-cols-[1.45fr_1fr_1fr] xl:px-10">
-            <div>
-              <Link
-  to="/project"
-  aria-label="Open the Rayjin Hardware Capstone Presentation"
-  className="
-    group flex w-fit items-center gap-3
-    rounded-xl
-    outline-none
-    transition
-    focus-visible:ring-2
-    focus-visible:ring-emerald-300
-    focus-visible:ring-offset-2
-    focus-visible:ring-offset-[#0B4B2B]
-  "
->
-  <span
-    className="
-      flex h-10 w-10 items-center justify-center
-      rounded-xl
-      bg-[#22C55E]
-      text-[#07321D]
-      shadow-sm
-      transition-transform
-      group-hover:scale-105
-    "
-  >
-    <Wrench className="h-5 w-5" strokeWidth={2.5} />
-  </span>
+        </div>
 
-  <div>
-    <p className="font-display text-sm font-extrabold tracking-wide transition group-hover:text-emerald-200">
-      RAYJIN
-    </p>
-
-    <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-emerald-300">
-      Hardware
-    </p>
-  </div>
-</Link>
-              <p className="mt-4 max-w-md text-xs leading-5 text-emerald-100/80">
-                Integrated online ordering, point-of-sale, inventory, delivery, and reporting tools for Rayjin Hardware operations.
-              </p>
-              <span className="mt-4 inline-flex rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[10px] font-semibold text-emerald-100">
-                Administration Console
-              </span>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-300">Dashboard Sections</p>
-              <div className="mt-4 grid gap-2 text-xs text-emerald-50/85">
-                <button type="button" onClick={() => setActiveTab('overview')} className="w-fit hover:text-white">Overview</button>
-                <button type="button" onClick={() => setActiveTab('orders')} className="w-fit hover:text-white">Manage Orders</button>
-                <button type="button" onClick={() => setActiveTab('reports')} className="w-fit hover:text-white">Reports Center</button>
+        <footer className="-mx-4 mt-10 border-t border-[#D8E5DD] bg-white/75 px-4 py-4 text-[#61766D] backdrop-blur-sm md:-mx-6 md:px-6 lg:-mx-6 xl:-mx-8 xl:px-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-[#15803d]"><Wrench className="h-4 w-4" /></span>
+              <div>
+                <p className="text-[10px] font-extrabold text-[#17372D]">© {new Date().getFullYear()} Rayjin Hardware Administration System</p>
+                <p className="mt-0.5 text-[8px] font-medium text-[#8A9992]">Brgy. Poblacion, Zone 11, Initao, Misamis Oriental</p>
               </div>
             </div>
-
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-300">System Areas</p>
-              <div className="mt-4 grid gap-2 text-xs text-emerald-50/85">
-                <button type="button" onClick={() => setActiveTab('products')} className="w-fit hover:text-white">Product Inventory</button>
-                <button type="button" onClick={() => setActiveTab('pos')} className="w-fit hover:text-white">POS / New Sale</button>
-                <button type="button" onClick={() => setActiveTab('deliveryRates')} className="w-fit hover:text-white">Delivery Rates</button>
-                <button type="button" onClick={() => setActiveTab('sales')} className="w-fit hover:text-white">Sales History</button>
-              </div>
+            <div className="flex items-center gap-2">
+              <Link to="/project" className="rounded-lg px-3 py-2 text-[9px] font-extrabold text-[#52635B] transition hover:bg-emerald-50 hover:text-[#15803d]">Capstone Overview</Link>
+              <button type="button" onClick={handleDashboardBackToTop} className="inline-flex items-center gap-1.5 rounded-lg border border-[#DDE6E0] bg-white px-3 py-2 text-[9px] font-extrabold text-[#17372D] transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#15803d]">Back to top <ArrowUp className="h-3.5 w-3.5" /></button>
             </div>
-          </div>
-
-          <div className="flex flex-col gap-4 border-t border-white/10 px-6 py-5 sm:flex-row sm:items-center sm:justify-between xl:px-10">
-            <p className="text-[10px] text-emerald-100/65">
-              © {new Date().getFullYear()} Rayjin Hardware — Administration System
-            </p>
-            <button
-              type="button"
-              onClick={handleDashboardBackToTop}
-              className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-white/15"
-            >
-              Back to top
-              <ArrowUp className="h-3.5 w-3.5" />
-            </button>
           </div>
         </footer>
 

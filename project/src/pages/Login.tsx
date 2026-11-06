@@ -4,6 +4,7 @@ import { User, Lock, AlertCircle, Eye, EyeOff, Wrench, Settings, Package, Shield
 import { useReveal } from '../hooks/useReveal';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { consumePostAuthRedirect } from '../utils/postAuthRedirect';
 
 export function Login() {
   const ref = useReveal<HTMLDivElement>();
@@ -51,12 +52,11 @@ const handleSubmit = async (e: React.FormEvent) => {
     // Notify Navbar immediately
     window.dispatchEvent(new Event('storage'));
 
+    const destination =
+      consumePostAuthRedirect(response.data.user.role);
+
     setTimeout(() => {
-      if (response.data.user.role === 'customer') {
-        navigate('/customer/dashboard');
-      } else {
-        navigate('/admin/dashboard');
-      }
+      navigate(destination);
     }, 2000);
 
   } catch (err) {

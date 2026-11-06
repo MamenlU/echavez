@@ -7,7 +7,7 @@ export function ColorSystem() {
       id="colors"
       eyebrow={sectionMeta.colors.eyebrow}
       title={sectionMeta.colors.title}
-      intro="Every color carries meaning. The palette mirrors a real hardware store — navy for trust, construction orange for action, and status accents that match stock conditions."
+      intro="The final interface centers on Rayjin Hardware green, clean white surfaces, soft mint support states, and clear status colors for a consistent storefront, customer, admin, and presentation experience."
       className="bg-steel-50"
     >
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -15,7 +15,7 @@ export function ColorSystem() {
           <div
             key={c.name}
             data-delay={i * 70}
-            className="reveal group overflow-hidden rounded-2xl border border-steel-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-navy-900/5"
+            className="reveal group overflow-hidden rounded-2xl border border-steel-200 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-950/5"
           >
             {/* Swatch */}
             <div
@@ -25,13 +25,13 @@ export function ColorSystem() {
               <div className="absolute right-4 top-4 flex items-center gap-1.5">
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                    c.text === 'light' ? 'bg-white/20 text-white' : 'bg-navy-900/10 text-navy-900'
+                    c.text === 'light' ? 'bg-white/20 text-white' : 'bg-[#052e16]/10 text-[#17372d]'
                   }`}
                 >
                   {c.category}
                 </span>
               </div>
-              <div className={c.text === 'light' ? 'text-white' : 'text-navy-900'}>
+              <div className={c.text === 'light' ? 'text-white' : 'text-[#17372d]'}>
                 <div className="font-display text-lg font-bold">{c.name}</div>
                 <div className="font-mono text-xs opacity-80">{c.hex}</div>
               </div>
@@ -42,7 +42,7 @@ export function ColorSystem() {
               <dl className="space-y-3 text-xs">
                 <div className="flex items-start gap-2">
                   <dt className="w-16 shrink-0 font-semibold uppercase tracking-wider text-steel-400">Role</dt>
-                  <dd className="text-navy-700">{c.role}</dd>
+                  <dd className="text-[#166534]">{c.role}</dd>
                 </div>
                 <div className="flex items-start gap-2">
                   <dt className="w-16 shrink-0 font-semibold uppercase tracking-wider text-steel-400">Meaning</dt>
@@ -54,25 +54,24 @@ export function ColorSystem() {
         ))}
 
         {/* Usage summary card */}
-        <div className="reveal group flex flex-col justify-between overflow-hidden rounded-2xl border border-navy-700 bg-navy-700 p-6 text-white shadow-xl">
+        <div className="reveal group flex flex-col justify-between overflow-hidden rounded-2xl border border-[#0b3b23] bg-[#0b3b23] p-6 text-white shadow-xl">
           <div>
             <h3 className="font-display text-lg font-bold text-white">Paired with intent</h3>
-            <p className="mt-2 text-sm leading-relaxed text-navy-100">
-              Navy anchors the interface for trust; orange drives every action;
-              status colors communicate stock and order state at a glance.
+            <p className="mt-2 text-sm leading-relaxed text-emerald-50">
+              Forest green anchors the Rayjin identity; emerald supports primary actions and positive states; neutral surfaces keep dense business interfaces readable.
             </p>
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-navy-100">
+            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-emerald-50">
               Primary
             </span>
-            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-navy-100">
+            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-emerald-50">
               Secondary
             </span>
-            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-navy-100">
+            <span className="rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-emerald-50">
               Accent
             </span>
-            <span className="rounded-md bg-construction-500 px-2.5 py-1 text-[11px] font-bold text-navy-950">
+            <span className="rounded-md bg-emerald-500 px-2.5 py-1 text-[11px] font-bold text-[#052e16]">
               Action
             </span>
           </div>
