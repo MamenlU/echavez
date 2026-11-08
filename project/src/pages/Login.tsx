@@ -69,9 +69,19 @@ const handleSubmit = async (e: React.FormEvent) => {
     if (err instanceof Error && err.message.startsWith('Your browser is blocking site storage.')) {
       setMessage(err.message);
     } else if (axios.isAxiosError(err)) {
-      setMessage(
-        err.response?.data?.error || 'Invalid credentials.'
-      );
+      const responseError = err.response?.data?.error;
+      const apiMessage =
+        typeof responseError === 'string' && responseError.trim()
+          ? responseError
+          : null;
+
+      if (apiMessage) {
+        setMessage(apiMessage);
+      } else if (!err.response || (err.response.status ?? 0) >= 500) {
+        setMessage('Sign-in is temporarily unavailable. Please try again shortly.');
+      } else {
+        setMessage('Invalid credentials.');
+      }
     } else {
       setMessage('Invalid credentials.');
     }
