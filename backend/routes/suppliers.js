@@ -131,7 +131,7 @@ router.post(
             );
 
             await recordAuditLog(connection, {
-                adminId: req.user.id, actorRole: req.user.role,
+                adminId: req.user.id,
                 action: 'supplier.create',
                 entityType: 'supplier',
                 entityId: result.insertId,
@@ -246,7 +246,7 @@ router.put(
             const leadTimeChanged = before.lead_time_days !== after.lead_time_days;
 
             await recordAuditLog(connection, {
-                adminId: req.user.id, actorRole: req.user.role,
+                adminId: req.user.id,
                 action: leadTimeChanged ? 'supplier.lead_time_update' : 'supplier.update',
                 entityType: 'supplier',
                 entityId: id,
@@ -317,7 +317,7 @@ router.patch(
 
             const after = { ...supplierSnapshot(currentRows[0]), status };
             await recordAuditLog(connection, {
-                adminId: req.user.id, actorRole: req.user.role,
+                adminId: req.user.id,
                 action: 'supplier.status_change',
                 entityType: 'supplier',
                 entityId: id,

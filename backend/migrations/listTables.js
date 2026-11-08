@@ -2,7 +2,9 @@ import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const DATABASE_URL = process.env.DATABASE_URL || 'mysql://root:iKTWIfFrAkPCspNHGTjwmHibpWTYGFaz@hayabusa.proxy.rlwy.net:41315/railway';
+const DATABASE_URL = process.env.LEGACY_MYSQL_DATABASE_URL;
+
+if (!DATABASE_URL) throw new Error('LEGACY_MYSQL_DATABASE_URL is required.');
 
 async function run() {
   const connection = await mysql.createConnection({

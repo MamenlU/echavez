@@ -35,7 +35,6 @@ function serializeAuditData(value) {
 
 export async function recordAuditLog(db, {
   adminId,
-  actorRole = null,
   action,
   entityType,
   entityId = null,
@@ -68,15 +67,6 @@ export async function recordAuditLog(db, {
     throw new Error('Audit log summary is invalid.');
   }
 
-  // Capture the role when the action occurred, without changing the physical audit table.
-  // Historical records without this snapshot are explicitly identified as current-role lookups.
-  const validActorRole = ['cashier', 'admin', 'super_admin'].includes(actorRole) ? actorRole : null;
-  const afterWithRole = validActorRole
-    ? { ...(after && typeof after === 'object' && !Array.isArray(after) ? after
-        : after == null ? {} : { value: after }),
-        actor_role_at_action: validActorRole }
-    : after;
-
   const [result] = await db.query(
     `INSERT INTO audit_logs (
       admin_id,
@@ -96,7 +86,7 @@ export async function recordAuditLog(db, {
       normalizedEntityId,
       normalizedSummary,
       serializeAuditData(before),
-      serializeAuditData(afterWithRole),
+      serializeAuditData(after),
       normalizedReason,
     ]
   );

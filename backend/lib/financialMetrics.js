@@ -14,13 +14,13 @@ const saleItemsAggregateSql = `
     COUNT(*) AS item_count,
     SUM(si.quantity) AS total_quantity,
     ROUND(SUM(si.subtotal), 2) AS merchandise_sales,
-    GROUP_CONCAT(
+    STRING_AGG(
       CONCAT(
         COALESCE(p.name, CONCAT('Product #', si.product_id)),
         ' × ',
         si.quantity
-      )
-      SEPARATOR ', '
+      ),
+      ', '
     ) AS items_summary
   FROM sale_items si
   LEFT JOIN products p ON p.id = si.product_id
@@ -74,13 +74,11 @@ const financialSaleBaseSql = `
     s.sale_id,
     s.order_id,
     s.admin_id,
-    s.shift_id,
     s.sales_source,
     s.payment_status,
     COALESCE(s.payment_method, o.payment_method, 'Cash') AS payment_method,
     s.cash_received,
     s.change_amount,
-    s.card_payment_reference,
     s.sale_date,
     s.fulfillment AS pos_fulfillment,
     COALESCE(items.item_count, 0) AS item_count,
@@ -283,18 +281,10 @@ export function summarizeFinancialRows(rows) {
 
 export async function getSalesFinancialHistory(database) {
   const [rows] = await database.query(
-    `SELECT financial_sales.*,
-       CONCAT_WS(' ', operator.first_name, operator.last_name) AS operator_name,
-       operator.username AS operator_username, operator.role AS operator_role,
-       cs.admin_id AS shift_owner_id,
-       CONCAT_WS(' ', owner.first_name, owner.last_name) AS shift_owner_name,
-       owner.username AS shift_owner_username, owner.role AS shift_owner_role
+    `SELECT financial_sales.*
      FROM (${financialSaleBaseSql}
        WHERE s.payment_status = 'Paid'
      ) financial_sales
-     LEFT JOIN users operator ON operator.id = financial_sales.admin_id
-     LEFT JOIN cashier_shifts cs ON cs.shift_id = financial_sales.shift_id
-     LEFT JOIN users owner ON owner.id = cs.admin_id
      ORDER BY financial_sales.sale_date DESC, financial_sales.sale_id DESC`
   );
 

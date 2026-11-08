@@ -116,7 +116,7 @@ export function ReorderSuggestionsPanel({
       });
 
       const body = await response.json().catch(() => ({}));
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         window.location.assign('/login');
         return;
       }

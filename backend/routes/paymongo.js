@@ -1,6 +1,6 @@
     import express from 'express';
     import pool from '../db.js';
-    import { authenticateToken, denyCashierRole, createCurrentAccountGuard } from '../middleware/auth.js';
+    import { authenticateToken } from '../middleware/auth.js';
     import { orderAmount, paymentProof } from '../lib/orderPayment.js';
     import { sendAdminOrderNotification } from '../lib/adminOrderNotificationEmail.js';
     import { safeCreateOrderSystemMessage } from '../lib/messageService.js';
@@ -21,7 +21,7 @@
     // Dependencies are injected only by the local test suite.
     export function createPaymongoRouter({ database = pool, request = fetch, env = process.env } = {}) {
         const router = express.Router();
-        router.use(authenticateToken, createCurrentAccountGuard(database), denyCashierRole);
+        router.use(authenticateToken);
 
         async function gateway(path, body) {
             const key = env.PAYMONGO_SECRET_KEY;
@@ -91,7 +91,7 @@
         sessionId,
         order.payment_method,
         amount / 100,
-        livemode,
+        livemode ? 1 : 0,
         checkoutUrl
     ]
                 );
@@ -214,12 +214,12 @@ if (proof.status === 'Paid') {
             try {
                 const { orderId } = req.body || {};
                 if (typeof orderId !== 'string' || !orderId || orderId.length > 50) throw fail(400, 'A valid order ID is required.');
-                if (!['admin', 'super_admin', 'customer'].includes(req.user?.role)) throw fail(403, 'Access denied.');
+                if (!['admin', 'customer'].includes(req.user?.role)) throw fail(403, 'Access denied.');
                 connection = await database.getConnection();
                 await connection.beginTransaction();
                 const [orders] = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [orderId]);
                 const order = orders[0];
-                if (!order || (Number(order.user_id) !== Number(req.user.id) && (create || !['admin', 'super_admin'].includes(req.user.role)))) throw fail(404, 'Order not found.');
+                if (!order || (Number(order.user_id) !== Number(req.user.id) && (create || req.user.role !== 'admin'))) throw fail(404, 'Order not found.');
                 if (!['gcash', 'card', 'paymongo'].includes(order.payment_method)) throw fail(400, 'This order uses cash payment.');
 
                 // Never reopen or replace a checkout for a final order. This check
@@ -320,7 +320,7 @@ if (proof.status === 'Paid') {
         sessionId,
         order.payment_method,
         amount / 100,
-        livemode,
+        livemode ? 1 : 0,
         checkoutUrl
     ]
                         );

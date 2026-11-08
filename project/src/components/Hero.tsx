@@ -22,7 +22,6 @@ export function Hero({
   return (
     <section
       id="top"
-      aria-labelledby="storefront-hero-title"
       className="relative isolate overflow-hidden border-b border-[#dfe9e2] bg-[#eef7f0] pt-24 lg:min-h-[650px] lg:pt-4"
     >
       <div className="absolute inset-0 -z-20 bg-[linear-gradient(108deg,#f9fcfa_0%,#edf7ef_45%,#dcefdc_100%)]" />
@@ -49,7 +48,7 @@ export function Hero({
             Rayjin Hardware Online Store
           </div>
 
-          <h1 id="storefront-hero-title" className="mt-5 max-w-2xl font-display text-4xl font-extrabold leading-[1.03] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[4.15rem]">
+          <h1 className="mt-5 max-w-2xl font-display text-4xl font-extrabold leading-[1.03] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[4.15rem]">
             Project-ready hardware.
             <span className="block text-[#16a34a]">Easier ordering.</span>
           </h1>
@@ -63,13 +62,13 @@ export function Hero({
             <button
               type="button"
               onClick={onShopProductsClick}
-              className="inline-flex items-center gap-2 min-h-11 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-[#166534] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-[#166534] active:scale-[0.98]"
             >
               Shop Products <ArrowRight className="h-4 w-4" />
             </button>
             <a
               href="#categories"
-              className="inline-flex items-center gap-2 min-h-11 rounded-xl border border-emerald-300 bg-white/90 px-5 py-3 text-sm font-extrabold text-[#166534] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white/90 px-5 py-3 text-sm font-extrabold text-[#166534] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50"
             >
               Browse Categories
             </a>
@@ -78,7 +77,7 @@ export function Hero({
           <Link
             to={supportHref}
             onClick={onSupportClick}
-            className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl border border-emerald-200/80 bg-white/82 px-4 py-3.5 text-left shadow-[0_14px_35px_-28px_rgba(11,59,35,0.8)] backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+            className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl border border-emerald-200/80 bg-white/82 px-4 py-3.5 text-left shadow-[0_14px_35px_-28px_rgba(11,59,35,0.8)] backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-[#15803d]">
               <MessageCircle className="h-5 w-5" />

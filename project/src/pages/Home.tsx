@@ -317,7 +317,7 @@ export function Home() {
                 <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-bold text-emerald-50">Minimum ₱1,000</span>
                 <Link
                   to="/register/customer"
-                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#0b3b23] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#0b3b23] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50"
                 >
                   Create Account
                   <ArrowRight className="h-3.5 w-3.5" />

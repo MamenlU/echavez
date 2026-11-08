@@ -1,75 +1,18 @@
 import express from 'express';
 import { randomInt } from 'node:crypto';
-import fs from 'fs';
-import path from 'path';
 import pool from '../db.js';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { normalizeSupplierReference } from '../lib/stockAudit.js';
 import { productAuditSnapshot, recordAuditLog } from '../lib/auditService.js';
+import {
+  safelyDeleteStoredImage,
+  storeProductImage,
+  storeReceiptImage,
+} from '../lib/imageStorage.js';
 
 const router = express.Router();
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-const RECEIPTS_DIR = path.join(UPLOADS_DIR, 'receipts');
 
-if (process.env.NODE_ENV !== 'production') {
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(RECEIPTS_DIR)) {
-    fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
-  }
-}
-
-function processBase64Image(imageValue) {
-  if (!imageValue || !String(imageValue).startsWith('data:image/')) return imageValue;
-  if (process.env.NODE_ENV === 'production') return imageValue;
-
-  const match = String(imageValue).match(/^data:image\/([A-Za-z0-9-+]+);base64,(.+)$/);
-  if (!match) {
-    throw Object.assign(new Error('Invalid product image.'), { statusCode: 400 });
-  }
-
-  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
-  const fileName = `prod_${Date.now()}_${randomInt(100, 1000)}.${extension}`;
-  fs.writeFileSync(path.join(UPLOADS_DIR, fileName), Buffer.from(match[2], 'base64'));
-  return `/api/uploads/${fileName}`;
-}
-
-function processOpeningReceipt(receiptImage) {
-  if (!receiptImage) return null;
-
-  const value = String(receiptImage);
-  const match = value.match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
-
-  if (!match) {
-    throw Object.assign(
-      new Error('Opening supplier receipt must be a JPG, PNG, or WEBP image.'),
-      { statusCode: 400 }
-    );
-  }
-
-  const buffer = Buffer.from(match[2], 'base64');
-
-  if (buffer.length > 5 * 1024 * 1024) {
-    throw Object.assign(
-      new Error('Opening supplier receipt must not exceed 5 MB.'),
-      { statusCode: 400 }
-    );
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    return value;
-  }
-
-  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
-  const fileName = `opening_receipt_${Date.now()}_${randomInt(1000, 10000)}.${extension}`;
-
-  fs.writeFileSync(path.join(RECEIPTS_DIR, fileName), buffer);
-  return `/api/uploads/receipts/${fileName}`;
-}
-
-function normalizeProductInput(body) {
+async function normalizeProductInput(body) {
   const name = String(body.name || '').trim();
 
   const description =
@@ -238,9 +181,7 @@ function normalizeProductInput(body) {
     deliveryClass,
     bulkQuantityThreshold,
     fulfillmentRule,
-    image: processBase64Image(
-      body.image || '📦'
-    ),
+    image: body.image || '📦',
   };
 }
 
@@ -306,9 +247,11 @@ router.get('/generate-barcode', authenticateToken, requireAdmin, async (_req, re
 
 router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   const connection = await pool.getConnection();
+  let uploadedProductImage = null;
+  let uploadedReceiptImage = null;
 
   try {
-    const product = normalizeProductInput(req.body);
+    const product = await normalizeProductInput(req.body);
     const openingCost = Number(req.body.opening_supplier_price);
 
     if (product.stock > 0 && (!Number.isFinite(openingCost) || openingCost <= 0)) {
@@ -322,12 +265,18 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
+    if (String(product.image).startsWith('data:image/')) {
+      product.image = await storeProductImage(product.image);
+      uploadedProductImage = product.image;
+    }
+
     const openingSupplierReference = product.stock > 0
       ? normalizeSupplierReference(req.body.opening_supplier_reference)
       : null;
     const openingReceiptPath = product.stock > 0
-      ? processOpeningReceipt(req.body.opening_receipt_image)
+      ? await storeReceiptImage(req.body.opening_receipt_image, 'Opening supplier receipt')
       : null;
+    uploadedReceiptImage = openingReceiptPath;
 
     await connection.beginTransaction();
 
@@ -404,7 +353,7 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'product.create',
       entityType: 'product',
       entityId: result.insertId,
@@ -432,6 +381,10 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    await Promise.all([
+      safelyDeleteStoredImage(uploadedProductImage),
+      safelyDeleteStoredImage(uploadedReceiptImage),
+    ]);
     console.error('Error adding product:', error);
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'This barcode is already assigned to another product.' });
@@ -446,14 +399,16 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
   const connection = await pool.getConnection();
+  let uploadedProductImage = null;
+  let previousProductImage = null;
 
   try {
-    const product = normalizeProductInput(req.body);
+    const product = await normalizeProductInput(req.body);
     await connection.beginTransaction();
 
     const [currentRows] = await connection.query(
       `SELECT id, barcode, name, unit, price, category, category_id, supplier_id,
-              stock, reorder_level, brand, status, delivery_class,
+              image, stock, reorder_level, brand, status, delivery_class,
               bulk_quantity_threshold, fulfillment_rule
        FROM products
        WHERE id = ? FOR UPDATE`,
@@ -461,6 +416,12 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     );
     if (currentRows.length === 0) {
       throw Object.assign(new Error('Product not found.'), { statusCode: 404 });
+    }
+    previousProductImage = currentRows[0].image;
+
+    if (String(product.image).startsWith('data:image/')) {
+      product.image = await storeProductImage(product.image);
+      uploadedProductImage = product.image;
     }
 
     const currentStock = Number(currentRows[0].stock);
@@ -542,7 +503,7 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
 
     const priceChanged = Number(beforeProduct?.price || 0) !== Number(afterProduct?.price || 0);
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: priceChanged ? 'product.price_update' : 'product.update',
       entityType: 'product',
       entityId: req.params.id,
@@ -555,9 +516,13 @@ router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
     });
 
     await connection.commit();
+    if (uploadedProductImage && previousProductImage !== uploadedProductImage) {
+      await safelyDeleteStoredImage(previousProductImage);
+    }
     res.json({ message: 'Product updated successfully.' });
   } catch (error) {
     await connection.rollback();
+    await safelyDeleteStoredImage(uploadedProductImage);
     console.error('Error updating product:', error);
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'This barcode is already assigned to another product.' });
@@ -607,7 +572,7 @@ router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) =>
       );
 
       await recordAuditLog(connection, {
-        adminId: req.user.id, actorRole: req.user.role,
+        adminId: req.user.id,
         action: 'product.status_change',
         entityType: 'product',
         entityId: productId,

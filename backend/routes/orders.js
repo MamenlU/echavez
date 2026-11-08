@@ -9,8 +9,6 @@ import {
     requireAdmin, requirePosStaff
 } from '../middleware/auth.js';
 
-import { recordAuditLog } from '../lib/auditService.js';
-import { requireOpenShiftForAdmin } from '../lib/cashierShiftService.js';
 import { sendAdminOrderNotification } from '../lib/adminOrderNotificationEmail.js';
 import {
     safeCreateOrderSystemMessage,
@@ -237,7 +235,6 @@ async function getOrderMessageHistory(orderId) {
           AND note IS NOT NULL
           AND TRIM(note) <> ''
           AND note <> 'Admin message cleared'
-          AND note NOT LIKE '[STAFF_ONLY]%'
         ORDER BY created_at ASC, history_id ASC
         `,
         [orderId]
@@ -339,8 +336,6 @@ router.get(
 router.post(
     '/delivery-rates',
     authenticateToken,
-    requireCurrentAccount,
-    denyCashierRole,
     requireAdmin,
     async (req, res) => {
         try {
@@ -624,8 +619,6 @@ router.get(
 router.get(
     '/discount/eligibility',
     authenticateToken,
-    requireCurrentAccount,
-    denyCashierRole,
     async (req, res) => {
         try {
             if (req.user.role !== 'customer') {
@@ -2119,10 +2112,6 @@ const {
     status,
     pickupOrderIdVerified
 } = req.body;
-const cashierCompleting = req.user.role === 'cashier';
-if (cashierCompleting && status !== 'completed') {
-    return res.status(403).json({ error: 'Cashiers may only release an eligible Ready pickup.' });
-}
 
 // This endpoint handles ONLINE CUSTOMER ORDERS only.
 // Onsite POS sales now use POST /api/sales/pos.
@@ -2786,15 +2775,6 @@ if (customerStatusMessage) {
     }, { context: `order status ${status}` });
 }
 
-await recordAuditLog(connection, {
-    adminId: req.user.id, actorRole: req.user.role, action: cashierCompleting ? 'pickup.handover' : 'order.status',
-    entityType: 'order', entityId: id,
-    summary: cashierCompleting ? `Cashier released pickup order ${id}.` : `Changed order ${id} to ${status}.`,
-    before: { status: order.status },
-    after: { status, actor_role: req.user.role, actor_user_id: req.user.id,
-      fulfillment: order.fulfillment, shift_id: cashierShiftId,
-      cash_tendered: cashierTender },
-});
 await connection.commit();
 
         if (status === 'completed') {

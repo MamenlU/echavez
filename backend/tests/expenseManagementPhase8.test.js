@@ -99,10 +99,10 @@ test('inventory purchases are explicitly excluded from operating-expense categor
 test('Admin UI exposes Expense Management and updated Cashier Shift reconciliation', () => {
   assert.match(dashboard, /'expenses'/);
   assert.match(dashboard, /<ExpenseManagementPanel/);
-  assert.match(panel, /Store Operating Expenses &amp; Estimated Profitability/);
+  assert.match(panel, /Expense Management &amp; Estimated Net Profit/);
   assert.match(panel, /Cash Drawer expenses require an open Cashier Shift/i);
   assert.match(cashierPanel, /Cash Drawer Expenses/);
-  assert.match(cashierPanel, /Opening Cash \+ Cash POS and Pickup Sales − Cash Refunds − Cash Drawer Expenses/);
+  assert.match(cashierPanel, /Opening Cash \+ Cash POS Sales − Cash Refunds − Cash Drawer Expenses/);
 });
 
 test('Audit Log UI labels Phase 8 expense actions', () => {

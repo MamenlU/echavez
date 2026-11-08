@@ -52,8 +52,7 @@ export async function getShiftMetrics(db, shiftId) {
     `SELECT
       cs.*,
       CONCAT_WS(' ', u.first_name, u.last_name) AS admin_name,
-      u.username AS admin_username,
-      u.role AS admin_role
+      u.username AS admin_username
      FROM cashier_shifts cs
      INNER JOIN users u ON u.id = cs.admin_id
      WHERE cs.shift_id = ?
@@ -71,7 +70,7 @@ export async function getShiftMetrics(db, shiftId) {
       COALESCE(SUM(total_amount), 0) AS total_pos_sales_amount
      FROM sales
      WHERE shift_id = ?
-       AND sales_source IN ('Onsite POS', 'Online Order')`,
+       AND sales_source = 'Onsite POS'`,
     [shiftId]
   );
 
@@ -108,12 +107,8 @@ export async function getShiftMetrics(db, shiftId) {
   return {
     shift_id: Number(shift.shift_id),
     admin_id: Number(shift.admin_id),
-    admin_name: shift.admin_name || shift.admin_username || `Staff #${shift.admin_id}`,
+    admin_name: shift.admin_name || shift.admin_username || `Admin #${shift.admin_id}`,
     admin_username: shift.admin_username || null,
-    admin_role: shift.admin_role || null,
-    shift_owner_id: Number(shift.admin_id),
-    shift_owner_name: shift.admin_name || shift.admin_username || `Staff #${shift.admin_id}`,
-    shift_owner_role: shift.admin_role || null,
     status: shift.status,
     opened_at: shift.opened_at,
     closed_at: shift.closed_at,

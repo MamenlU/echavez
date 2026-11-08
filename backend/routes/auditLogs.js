@@ -1,30 +1,19 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, requireAdmin, requirePosStaff } from '../middleware/auth.js';
-import { decorateAuditRows } from '../lib/staffActivity.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
-router.use(authenticateToken, requirePosStaff);
+router.use(authenticateToken, requireAdmin);
 
-// A Cashier can review only their own sanitized business activity. Never expose
-// another staff member's logs, before/after payloads, or sensitive audit reasons.
-router.get('/mine', async (req, res) => {
+function parseJsonValue(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
   try {
-    const requestedLimit = Number(req.query.limit || 60);
-    const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 60;
-    const [rows] = await pool.query(
-      `SELECT audit_id, action, entity_type, entity_id, summary, created_at
-       FROM audit_logs WHERE admin_id = ? ORDER BY created_at DESC, audit_id DESC LIMIT ?`,
-      [req.user.id, limit]
-    );
-    res.json({ activities: rows, count: rows.length, limit });
-  } catch (error) {
-    console.error('Personal activity history error:', error);
-    res.status(500).json({ error: 'Unable to load your activity history.' });
+    return JSON.parse(value);
+  } catch {
+    return null;
   }
-});
-
-router.use(requireAdmin);
+}
 
 router.get('/', async (req, res) => {
   try {
@@ -51,7 +40,7 @@ router.get('/', async (req, res) => {
         u.username LIKE ?
       )`);
       const pattern = `%${search}%`;
-      params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+      params.push(pattern, pattern, pattern, pattern, pattern, pattern);
     }
 
     if (action) {
@@ -70,7 +59,7 @@ router.get('/', async (req, res) => {
     }
 
     if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-      conditions.push('al.created_at < DATE_ADD(?, INTERVAL 1 DAY)');
+      conditions.push("al.created_at < (?::timestamp + INTERVAL '1 day')");
       params.push(`${to} 00:00:00`);
     }
 
@@ -82,7 +71,6 @@ router.get('/', async (req, res) => {
         al.admin_id,
         u.username AS admin_username,
         CONCAT_WS(' ', u.first_name, u.last_name) AS admin_name,
-        u.role AS admin_role,
         al.action,
         al.entity_type,
         al.entity_id,
@@ -99,7 +87,11 @@ router.get('/', async (req, res) => {
       [...params, limit]
     );
 
-    const logs = await decorateAuditRows(pool, rows);
+    const logs = rows.map((row) => ({
+      ...row,
+      before_data: parseJsonValue(row.before_data),
+      after_data: parseJsonValue(row.after_data),
+    }));
 
     res.json({ logs, count: logs.length, limit });
   } catch (error) {

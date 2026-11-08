@@ -7,10 +7,13 @@ import { ProductDetailsModal } from '../components/ProductDetailsModal';
 import { PopularProducts, type PopularProduct } from '../components/PopularProducts';
 import { PremiumCategoryShowcase } from '../components/PremiumCategoryShowcase';
 import { CustomerConfidenceCards } from '../components/CustomerConfidenceCards';
+import {
+  RAYJIN_CONTACT
+} from '../data/contact';
 import { 
   ShoppingCart, Clock, BadgePercent, 
   Search, Plus, Minus, Trash2, CreditCard, CheckCircle, 
-  MapPin, Phone, Mail, ArrowRight, Package, Truck, Store,
+  MapPin, Phone, Mail, ArrowRight, Package, Truck, Store, Wrench,
   ShieldCheck, MessageCircle
 } from 'lucide-react';
 
@@ -2355,7 +2358,6 @@ const getCustomerOrderGroupLabel = (
           {/* Personalized customer hub hero */}
           <section
             id="customer-home-top"
-            aria-labelledby="customer-welcome-title"
             className="relative isolate left-1/2 -mt-6 w-[100cqw] -translate-x-1/2 overflow-hidden border-b border-[#dfe9e2] bg-[#eef7f0] text-[#123c2d]"
           >
             <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_18%_18%,rgba(34,197,94,0.12),transparent_30%),linear-gradient(115deg,#fbfdfb_0%,#eef7f0_50%,#dcefdc_100%)]" aria-hidden />
@@ -2377,7 +2379,7 @@ const getCustomerOrderGroupLabel = (
 
                   <p className="mt-5 text-sm font-semibold text-[#15803d]">Welcome back, {customerDisplayName}!</p>
 
-                  <h1 id="customer-welcome-title" className="mt-2 max-w-xl font-display text-4xl font-extrabold leading-[1.04] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[3.6rem]">
+                  <h1 className="mt-2 max-w-xl font-display text-4xl font-extrabold leading-[1.04] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[3.6rem]">
                     Your project starts
                     <span className="block text-[#16a34a]">with the right supplies.</span>
                   </h1>
@@ -2390,7 +2392,7 @@ const getCustomerOrderGroupLabel = (
                     <button
                       type="button"
                       onClick={() => setActiveTab('catalog')}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-[#166534] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-[#166534] active:scale-[0.98]"
                     >
                       <ShoppingCart className="h-4 w-4" /> Browse Products <ArrowRight className="h-4 w-4" />
                     </button>
@@ -2398,7 +2400,7 @@ const getCustomerOrderGroupLabel = (
                     <button
                       type="button"
                       onClick={() => setActiveTab('orders')}
-                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white/90 px-5 py-3 text-sm font-extrabold text-[#17372d] shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white/90 px-5 py-3 text-sm font-extrabold text-[#17372d] shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white"
                     >
                       <Package className="h-4 w-4" /> Track My Orders
                     </button>
@@ -2406,7 +2408,7 @@ const getCustomerOrderGroupLabel = (
                     <button
                       type="button"
                       onClick={() => setActiveTab('messages')}
-                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50/90 px-5 py-3 text-sm font-extrabold text-[#15803d] transition hover:-translate-y-0.5 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50/90 px-5 py-3 text-sm font-extrabold text-[#15803d] transition hover:-translate-y-0.5 hover:bg-emerald-100"
                     >
                       <MessageCircle className="h-4 w-4" /> Message Rayjin
                     </button>
@@ -4535,9 +4537,102 @@ const isLatest =
 
 
 
-      <div className="relative left-1/2 -mb-16 mt-8 w-[100cqw] -translate-x-1/2">
-        <Footer />
-      </div>
+      {/* ========================================================
+          CUSTOMER DASHBOARD FOOTER
+          Same Rayjin Hardware design language as the Storefront.
+          ======================================================== */}
+      <footer className="relative left-1/2 -mb-16 mt-4 w-[100cqw] -translate-x-1/2 overflow-hidden bg-[#0b3b23] text-emerald-50">
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-30 [background-image:radial-gradient(rgba(255,255,255,0.14)_1px,transparent_1px)] [background-size:18px_18px]"
+        />
+
+        <div className="relative mx-auto max-w-7xl px-5 py-12 md:px-8 lg:py-14">
+          <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-12">
+            <div className="lg:col-span-4">
+              <a
+                href="/project"
+                className="group inline-flex items-center gap-2.5"
+                aria-label="Open Rayjin Hardware system presentation"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#22c55e] text-[#052e16] shadow-lg shadow-emerald-950/20 transition-transform group-hover:scale-105">
+                  <Wrench className="h-5 w-5" strokeWidth={2.5} />
+                </span>
+                <span className="flex flex-col leading-none">
+                  <span className="font-display text-base font-extrabold tracking-wide text-white">RAYJIN</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Hardware</span>
+                </span>
+              </a>
+
+              <p className="mt-4 max-w-sm text-sm leading-6 text-emerald-100/80">
+                Browse current hardware products, check live availability, and manage your orders for pickup, local delivery, or Shop &amp; Go.
+              </p>
+
+              <div className="mt-5 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-emerald-100">
+                <Store className="h-3.5 w-3.5 text-emerald-300" />
+                Online ordering with live inventory visibility
+              </div>
+            </div>
+
+            <div className="lg:col-span-3">
+              <h4 className="text-xs font-extrabold uppercase tracking-[0.16em] text-emerald-300">
+                Store Information
+              </h4>
+              <div className="mt-4 space-y-3 text-sm text-emerald-100/85">
+                <p className="flex items-start gap-2.5">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <span>{RAYJIN_CONTACT.address}</span>
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <Store className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <span>Local hardware ordering, pickup and delivery services.</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2">
+              <h4 className="text-xs font-extrabold uppercase tracking-[0.16em] text-emerald-300">
+                Order Services
+              </h4>
+              <div className="mt-4 flex flex-col gap-2.5 text-sm text-emerald-100/85">
+                <span>Standard Pickup</span>
+                <span>Local Delivery</span>
+                <span>Shop &amp; Go</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3">
+              <h4 className="text-xs font-extrabold uppercase tracking-[0.16em] text-emerald-300">
+                Contact
+              </h4>
+              <div className="mt-4 space-y-3 text-sm text-emerald-100/85">
+                <p className="flex items-start gap-2.5">
+                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <span className="break-all">{RAYJIN_CONTACT.email}</span>
+                </p>
+                <p className="flex items-start gap-2.5">
+                  <Phone className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <span>{RAYJIN_CONTACT.phone}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-white/10 pt-6 sm:flex-row">
+            <p className="text-xs text-emerald-100/65">
+              © {new Date().getFullYear()} Rayjin Hardware. All rights reserved.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
+            >
+              Back to top
+              <ArrowRight className="h-3.5 w-3.5 -rotate-90" />
+            </button>
+          </div>
+        </div>
+      </footer>
 
       {/* ========================================================
           UNIFIED PREMIUM PRODUCT DETAILS

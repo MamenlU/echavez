@@ -6,11 +6,14 @@ const money = (value) => {
 };
 
 export const EXPENSE_CATEGORIES = [
-  'Truck Repairs & Maintenance',
   'Utilities',
-  'Delivery & Transportation',
+  'Transportation / Delivery',
+  'Repairs & Maintenance',
   'Store Supplies',
-  'Other Operating Expenses',
+  'Rent',
+  'Communication',
+  'Permits / Fees',
+  'Other',
 ];
 
 

@@ -1,8 +1,7 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, requireAdmin, requireActionApproval } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { recordAuditLog } from '../lib/auditService.js';
-import { EXPENSE_CATEGORY_DESCRIPTIONS } from '../lib/expenseCategoryDescriptions.js';
 import { getOpenShiftForAdmin } from '../lib/cashierShiftService.js';
 import { getPhilippineBusinessRanges } from '../lib/businessTime.js';
 import {
@@ -19,7 +18,7 @@ const router = express.Router();
 router.use(authenticateToken, requireAdmin);
 
 router.get('/meta', (_req, res) => {
-  res.json({ categories: EXPENSE_CATEGORIES, category_descriptions: EXPENSE_CATEGORY_DESCRIPTIONS, payment_methods: EXPENSE_PAYMENT_METHODS });
+  res.json({ categories: EXPENSE_CATEGORIES, payment_methods: EXPENSE_PAYMENT_METHODS });
 });
 
 router.get('/summary', async (req, res) => {
@@ -48,16 +47,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
-  // Regular non-cash expenses remain a Manager operation. Cash-drawer expense
-  // creation requires Super Admin authorization before any database writes.
-  if (req.body?.paymentMethod === 'Cash Drawer') {
-    return requireActionApproval('cash_drawer_expense')(req, res, () => createExpense(req, res));
-  }
-  return createExpense(req, res);
-});
-
-async function createExpense(req, res) {
+router.post('/', async (req, res) => {
   let connection;
   try {
     const input = normalizeExpenseInput(req.body);
@@ -101,7 +91,7 @@ async function createExpense(req, res) {
     );
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'expense.create',
       entityType: 'expense',
       entityId: result.insertId,
@@ -115,8 +105,7 @@ async function createExpense(req, res) {
         payment_method: input.paymentMethod,
         reference_number: input.referenceNumber,
         shift_id: shiftId,
-        status: 'Recorded', operator_user_id: req.user.id, operator_role: req.user.role,
-        approval: req.managerApproval || { status: 'not_required' },
+        status: 'Recorded',
       },
       reason: 'Operating expense recorded.',
     });
@@ -134,9 +123,9 @@ async function createExpense(req, res) {
   } finally {
     if (connection) connection.release();
   }
-}
+});
 
-router.post('/:expenseId/void', requireActionApproval('expense_void'), async (req, res) => {
+router.post('/:expenseId/void', async (req, res) => {
   let connection;
   try {
     const expenseId = Number(req.params.expenseId);
@@ -182,7 +171,7 @@ router.post('/:expenseId/void', requireActionApproval('expense_void'), async (re
     );
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'expense.void',
       entityType: 'expense',
       entityId: expenseId,
@@ -196,8 +185,7 @@ router.post('/:expenseId/void', requireActionApproval('expense_void'), async (re
         payment_method: expense.payment_method,
         shift_id: expense.shift_id === null ? null : Number(expense.shift_id),
       },
-      after: { status: 'Voided', void_reason: reason, operator_role: req.user.role,
-        approval: req.managerApproval || { status: 'not_required' } },
+      after: { status: 'Voided', void_reason: reason },
       reason,
     });
 

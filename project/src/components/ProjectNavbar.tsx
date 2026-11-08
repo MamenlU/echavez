@@ -100,8 +100,9 @@ export function ProjectNavbar() {
     window.history.replaceState(null, '', href);
   };
 
-  const dashboardPath = (user?.role === 'admin' || user?.role === 'super_admin') ? '/admin/dashboard'
-    : user?.role === 'cashier' ? '/cashier/dashboard' : '/customer/dashboard?tab=overview';
+  const dashboardPath = user?.role === 'admin'
+    ? '/admin/dashboard'
+    : '/customer/dashboard?tab=overview';
 
   const displayName = user?.first_name?.trim() || user?.username || '';
 

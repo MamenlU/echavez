@@ -76,7 +76,7 @@ const authFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       Authorization: `Bearer ${token}`,
     },
   });
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     window.location.assign('/login');
@@ -104,7 +104,6 @@ export function ExpenseManagementPanel() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [summary, setSummary] = useState<ProfitSummary | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
-  const [categoryDescriptions, setCategoryDescriptions] = useState<Record<string,string>>({});
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -117,16 +116,13 @@ export function ExpenseManagementPanel() {
   const [to, setTo] = useState(today());
   const [voidTarget, setVoidTarget] = useState<Expense | null>(null);
   const [voidReason, setVoidReason] = useState('');
-  const [approvalUsername, setApprovalUsername] = useState('');
-  const [approvalPassword, setApprovalPassword] = useState('');
-  const isSuperAdmin = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').role === 'super_admin'; } catch { return false; } })();
 
   const [form, setForm] = useState({
     expenseDate: today(),
     category: 'Utilities',
     description: '',
     amount: '',
-    paymentMethod: '',
+    paymentMethod: 'Cash Drawer',
     referenceNumber: '',
   });
 
@@ -166,7 +162,6 @@ export function ExpenseManagementPanel() {
       setExpenses(Array.isArray(expenseData.expenses) ? expenseData.expenses : []);
       setSummary(summaryData.summary || null);
       setCategories(Array.isArray(metaData.categories) ? metaData.categories : []);
-      setCategoryDescriptions(metaData.category_descriptions || {});
       setPaymentMethods(Array.isArray(metaData.payment_methods) ? metaData.payment_methods : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load Expense Management.');
@@ -195,13 +190,11 @@ export function ExpenseManagementPanel() {
       const response = await authFetch('/api/expenses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, amount,
-          ...(form.paymentMethod === 'Cash Drawer' ? { managerUsername: approvalUsername, managerPassword: approvalPassword } : {}) }),
+        body: JSON.stringify({ ...form, amount }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to record expense.');
       setSuccess('Operating expense recorded successfully.');
-      setApprovalPassword('');
       setForm((current) => ({
         ...current,
         expenseDate: today(),
@@ -230,13 +223,13 @@ export function ExpenseManagementPanel() {
       const response = await authFetch(`/api/expenses/${voidTarget.expense_id}/void`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: voidReason.trim(), managerUsername: approvalUsername, managerPassword: approvalPassword }),
+        body: JSON.stringify({ reason: voidReason.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to void expense.');
       setSuccess(`Expense #${voidTarget.expense_id} was voided and excluded from estimated net profit.`);
       setVoidTarget(null);
-      setVoidReason(''); setApprovalPassword('');
+      setVoidReason('');
       await loadAll();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to void expense.');
@@ -260,7 +253,7 @@ export function ExpenseManagementPanel() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Operating Costs &amp; Profitability</p>
-          <h2 className="mt-1 font-display text-2xl font-extrabold text-[#17372D]">Store Operating Expenses &amp; Estimated Profitability</h2>
+          <h2 className="mt-1 font-display text-2xl font-extrabold text-[#17372D]">Expense Management &amp; Estimated Net Profit</h2>
           <p className="mt-1 max-w-4xl text-sm text-[#71817A]">
             Record operating expenses separately from inventory purchases, then estimate business profit using verified sales, COGS, service/delivery revenue, and recorded operating costs.
           </p>
@@ -310,18 +303,13 @@ export function ExpenseManagementPanel() {
           <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#EEF8F2] text-[#2F7D5A]"><CircleDollarSign className="h-5 w-5" /></span><div><h3 className="font-display text-base font-extrabold text-[#17372D]">Record Operating Expense</h3><p className="mt-1 text-xs text-[#71817A]">Inventory purchases are excluded from this module.</p></div></div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="text-xs font-bold text-[#34463F]">Expense Date<input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label>
-            <label className="text-xs font-bold text-[#34463F]">Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5">{categories.map((item) => <option key={item}>{item}</option>)}</select><span className="mt-1 block font-normal text-slate-500">{categoryDescriptions[form.category] || "Choose a genuine store operating cost."}</span></label>
+            <label className="text-xs font-bold text-[#34463F]">Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5">{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="sm:col-span-2 text-xs font-bold text-[#34463F]">Description<input value={form.description} maxLength={255} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Example: October electricity bill" className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label>
             <label className="text-xs font-bold text-[#34463F]">Amount<input type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="0.00" className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label>
-            <label className="text-xs font-bold text-[#34463F]">Payment Method<select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5"><option value="">Select payment method</option>{paymentMethods.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label className="text-xs font-bold text-[#34463F]">Payment Method<select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5">{paymentMethods.map((item) => <option key={item}>{item}</option>)}</select></label>
             <label className="sm:col-span-2 text-xs font-bold text-[#34463F]">Reference Number (optional)<input value={form.referenceNumber} maxLength={150} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} placeholder="Receipt, bill, transfer, or internal reference" className="mt-1.5 w-full rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label>
           </div>
           {form.paymentMethod === 'Cash Drawer' && <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-900"><Wallet className="mr-1 inline h-4 w-4" /> Cash Drawer expenses require an open Cashier Shift and reduce that shift's expected drawer cash.</div>}
-          {form.paymentMethod === 'Cash Drawer' && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-            <p className="text-xs font-bold">{isSuperAdmin ? 'Super Admin reauthentication' : 'Super Admin approval'} required for Cash Drawer expenses</p>
-            <input className="w-full rounded-lg border p-2 text-xs" aria-label="Expense approver username" placeholder="Super Admin username or email" value={approvalUsername} onChange={e => setApprovalUsername(e.target.value)} autoComplete="off" />
-            <input className="w-full rounded-lg border p-2 text-xs" aria-label="Expense approver password" placeholder="Super Admin password" type="password" value={approvalPassword} onChange={e => setApprovalPassword(e.target.value)} autoComplete="off" />
-          </div>}
           <button type="submit" disabled={submitting} className="mt-5 w-full rounded-xl bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{submitting ? 'Recording…' : 'Record Expense'}</button>
         </form>
 
@@ -359,10 +347,7 @@ export function ExpenseManagementPanel() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-[#E5ECE8] p-5"><div><p className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-red-600">Void Expense</p><h3 className="mt-1 font-display text-lg font-extrabold text-[#17372D]">{voidTarget.category} · {formatPeso(voidTarget.amount)}</h3><p className="mt-1 text-xs text-[#71817A]">The record will remain in history and Audit Logs.</p></div><button type="button" onClick={() => setVoidTarget(null)} className="rounded-lg p-2 hover:bg-slate-100"><X className="h-4 w-4" /></button></div>
-            <div className="p-5"><label className="text-xs font-bold text-[#34463F]">Reason<textarea rows={3} maxLength={500} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="Explain why this expense record must be voided." className="mt-1.5 w-full resize-none rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label><div className="mt-4 space-y-2 rounded-xl bg-amber-50 p-3"><p className="text-xs font-bold">Super Admin verification required</p>
-              <input aria-label="Void expense approver" className="w-full rounded border p-2 text-xs" placeholder="Super Admin username" value={approvalUsername} onChange={e => setApprovalUsername(e.target.value)} autoComplete="off" />
-              <input aria-label="Void expense approver password" type="password" className="w-full rounded border p-2 text-xs" placeholder="Super Admin password" value={approvalPassword} onChange={e => setApprovalPassword(e.target.value)} autoComplete="off" />
-              </div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setVoidTarget(null)} className="rounded-xl border border-[#DDE6E0] px-4 py-2.5 text-xs font-bold">Cancel</button><button type="button" onClick={() => void voidExpense()} disabled={submitting} className="rounded-xl bg-red-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{submitting ? 'Voiding…' : 'Void Expense'}</button></div></div>
+            <div className="p-5"><label className="text-xs font-bold text-[#34463F]">Reason<textarea rows={3} maxLength={500} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="Explain why this expense record must be voided." className="mt-1.5 w-full resize-none rounded-xl border border-[#DDE6E0] px-3 py-2.5" /></label><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setVoidTarget(null)} className="rounded-xl border border-[#DDE6E0] px-4 py-2.5 text-xs font-bold">Cancel</button><button type="button" onClick={() => void voidExpense()} disabled={submitting} className="rounded-xl bg-red-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{submitting ? 'Voiding…' : 'Void Expense'}</button></div></div>
           </div>
         </div>
       )}

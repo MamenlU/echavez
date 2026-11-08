@@ -51,6 +51,16 @@ test('Inventory Movement History is the centralized full audit view', () => {
   assert.match(adminDashboard, /<th className="px-4 py-3">Receipt<\/th>/);
   assert.match(adminDashboard, /View Receipt/);
   assert.doesNotMatch(adminDashboard, />Stock-In History</);
+  assert.match(adminDashboard, /selectedMovementHistory && createPortal\(/);
+  assert.match(adminDashboard, /selectedSaleHistory && createPortal\(/);
+  assert.match(adminDashboard, /document\.body/);
+});
+
+test('Inventory movement reference labels cast numeric IDs before PostgreSQL LPAD', () => {
+  const movementHandler = sliceBetween(inventoryRoute, "router.get('/movements'", "router.post('/opening'");
+  const lpadCalls = movementHandler.match(/LPAD\(([^,]+),\s*6,\s*'0'\)/g) || [];
+  assert.equal(lpadCalls.length, 6);
+  assert.ok(lpadCalls.every((call) => call.includes('::text')));
 });
 
 test('Receive Stock uses a compact Recent Stock-In summary and links to centralized Stock-In filtering', () => {

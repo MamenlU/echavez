@@ -28,10 +28,6 @@ async function fixture(t, {
     const query = async (statement, params = []) => {
         const sql = statement.trim().replace(/\s+/g, ' ');
         calls.push({ sql, params });
-        if (sql.startsWith('SELECT id, username, role, status FROM users WHERE id = ?')) {
-            const id = Number(params[0]);
-            return [[{ id, username: 'fixture', role: id === 1 ? 'admin' : 'customer', status: 'active' }]];
-        }
         if (/SELECT .*FROM users/.test(sql)) return [[{ id: 2, first_name: 'Test', last_name: 'Customer', phone_number: '+639123456789', first_order_discount_used: priorOrders ? 1 : 0 }]];
         if (sql.startsWith('SELECT COUNT(*) AS order_count')) return [[{ order_count: priorOrders }]];
         if (sql.startsWith('SELECT payment_id FROM payments')) return [paidOrder ? [{ payment_id: 1 }] : []];

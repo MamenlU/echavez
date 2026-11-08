@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, denyCashierRole, createCurrentAccountGuard } from '../middleware/auth.js';
+import { authenticateToken } from '../middleware/auth.js';
 import {
     createMessageService,
     MessagingError,
@@ -25,7 +25,7 @@ export function createMessagesRouter({ database = pool, service = null } = {}) {
     const router = express.Router();
     const messages = service || createMessageService(database);
 
-    router.use(authenticateToken, createCurrentAccountGuard(database), denyCashierRole);
+    router.use(authenticateToken);
 
     router.get('/conversations', async (req, res) => {
         try {

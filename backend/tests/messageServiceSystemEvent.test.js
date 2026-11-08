@@ -23,7 +23,7 @@ function createExecutor() {
                 return [[{ conversation_id: 42 }]];
             }
 
-            if (sql.includes('INSERT IGNORE INTO conversation_messages')) {
+            if (sql.includes('INSERT INTO conversation_messages') && sql.includes('ON CONFLICT')) {
                 const eventKey = params[5];
                 if (eventKeys.has(eventKey)) {
                     return [{ affectedRows: 0, insertId: 0 }];
@@ -58,7 +58,7 @@ test('automatic order system messages use deterministic event-key deduplication'
     assert.equal(second.inserted, false);
 
     const messageInsert = executor.observed.find(entry =>
-        entry.sql.includes('INSERT IGNORE INTO conversation_messages')
+        entry.sql.includes('INSERT INTO conversation_messages') && entry.sql.includes('ON CONFLICT')
     );
 
     assert.ok(messageInsert);

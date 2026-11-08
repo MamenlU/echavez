@@ -1,8 +1,7 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, requireAdmin, requirePosStaff, requireActionApproval } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { recordAuditLog } from '../lib/auditService.js';
-import { enrichAdjustmentApprovals } from '../lib/staffActivity.js';
 import {
   calculateReturnLine,
   getSaleAdjustmentSnapshot,
@@ -12,28 +11,7 @@ import {
 import { getOpenShiftForAdmin, requireOpenShiftForAdmin } from '../lib/cashierShiftService.js';
 
 const router = express.Router();
-router.use(authenticateToken, requirePosStaff);
-
-// Cashiers may adjust only POS transactions they originally processed.
-// Manager-approved adjustments for other sales stay in the Admin workflow.
-async function requireCashierSaleOwnership(req, res, next) {
-  if (req.user.role !== 'cashier') return next();
-  const saleId = Number(req.body?.saleId);
-  if (!Number.isSafeInteger(saleId) || saleId <= 0) {
-    return res.status(400).json({ error: 'Select a valid POS sale.' });
-  }
-  try {
-    const [rows] = await pool.query(
-      "SELECT sale_id FROM sales WHERE sale_id = ? AND admin_id = ? AND sales_source = 'Onsite POS' LIMIT 1",
-      [saleId, req.user.id]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'Sale not found.' });
-    return next();
-  } catch (error) {
-    console.error('Sale ownership verification error:', error);
-    return res.status(503).json({ error: 'Cannot verify sale ownership.' });
-  }
-}
+router.use(authenticateToken, requireAdmin);
 
 const money = (value) => {
   const number = Number(value);
@@ -149,18 +127,14 @@ router.get('/', async (req, res) => {
 
     const conditions = [];
     const params = [];
-    if (req.user.role === 'cashier') {
-      conditions.push('sa.processed_by_admin_id = ?');
-      params.push(req.user.id);
-    }
     if (type === 'Return' || type === 'Void') {
       conditions.push('sa.adjustment_type = ?');
       params.push(type);
     }
     if (search) {
       conditions.push(`(
-        CAST(sa.adjustment_id AS CHAR) LIKE ? OR
-        CAST(sa.sale_id AS CHAR) LIKE ? OR
+        CAST(sa.adjustment_id AS TEXT) LIKE ? OR
+        CAST(sa.sale_id AS TEXT) LIKE ? OR
         COALESCE(s.order_id, '') LIKE ? OR
         sa.reason LIKE ? OR
         COALESCE(sa.refund_reference, '') LIKE ? OR
@@ -193,7 +167,6 @@ router.get('/', async (req, res) => {
         s.payment_method AS original_payment_method,
         CONCAT_WS(' ', u.first_name, u.last_name) AS processed_by,
         u.username AS processed_by_username,
-        u.role AS processed_by_role,
         COALESCE(items.item_lines, 0) AS item_lines,
         COALESCE(items.total_quantity, 0) AS total_quantity,
         COALESCE(items.restocked_quantity, 0) AS restocked_quantity,
@@ -209,7 +182,7 @@ router.get('/', async (req, res) => {
            SUM(sai.quantity) AS total_quantity,
            SUM(CASE WHEN sai.restockable = 1 THEN sai.quantity ELSE 0 END) AS restocked_quantity,
            SUM(CASE WHEN sai.restockable = 0 THEN sai.quantity ELSE 0 END) AS non_restocked_quantity,
-           GROUP_CONCAT(CONCAT(p.name, ' × ', sai.quantity) ORDER BY sai.adjustment_item_id SEPARATOR ', ') AS items_summary
+           STRING_AGG(CONCAT(p.name, ' × ', sai.quantity), ', ' ORDER BY sai.adjustment_item_id) AS items_summary
          FROM sale_adjustment_items sai
          INNER JOIN products p ON p.id = sai.product_id
          GROUP BY sai.adjustment_id
@@ -220,12 +193,15 @@ router.get('/', async (req, res) => {
       [...params, limit]
     );
 
-    const adjustments = await enrichAdjustmentApprovals(pool, rows.map((row) => ({
-      ...row,
-      adjustment_reference: `${row.adjustment_type === 'Void' ? 'VOID' : 'RET'}-${String(row.adjustment_id).padStart(6, '0')}`,
-      sale_reference: row.order_id || `POS-${String(row.sale_id).padStart(6, '0')}`,
-    })));
-    res.json({ adjustments, count: adjustments.length, limit });
+    res.json({
+      adjustments: rows.map((row) => ({
+        ...row,
+        adjustment_reference: `${row.adjustment_type === 'Void' ? 'VOID' : 'RET'}-${String(row.adjustment_id).padStart(6, '0')}`,
+        sale_reference: row.order_id || `POS-${String(row.sale_id).padStart(6, '0')}`,
+      })),
+      count: rows.length,
+      limit,
+    });
   } catch (error) {
     console.error('Sale adjustment history error:', error);
     res.status(500).json({ error: 'Unable to load return/refund/void history.' });
@@ -234,13 +210,6 @@ router.get('/', async (req, res) => {
 
 router.get('/sales/:saleId/eligibility', async (req, res) => {
   try {
-    if (req.user.role === 'cashier') {
-      const [owned] = await pool.query(
-        "SELECT sale_id FROM sales WHERE sale_id = ? AND admin_id = ? AND sales_source = 'Onsite POS' LIMIT 1",
-        [req.params.saleId, req.user.id]
-      );
-      if (!owned.length) return res.status(404).json({ error: 'Sale not found.' });
-    }
     const snapshot = await getSaleAdjustmentSnapshot(pool, req.params.saleId);
     if (!snapshot) return res.status(404).json({ error: 'Sale not found.' });
     res.json(snapshot);
@@ -264,8 +233,7 @@ router.get('/:adjustmentId', async (req, res) => {
         s.sales_source,
         s.sale_date,
         CONCAT_WS(' ', u.first_name, u.last_name) AS processed_by,
-        u.username AS processed_by_username,
-        u.role AS processed_by_role
+        u.username AS processed_by_username
        FROM sale_adjustments sa
        INNER JOIN sales s ON s.sale_id = sa.sale_id
        INNER JOIN users u ON u.id = sa.processed_by_admin_id
@@ -273,10 +241,7 @@ router.get('/:adjustmentId', async (req, res) => {
        LIMIT 1`,
       [adjustmentId]
     );
-    if (!headers.length || (req.user.role === 'cashier'
-      && Number(headers[0].processed_by_admin_id) !== req.user.id)) {
-      return res.status(404).json({ error: 'Adjustment not found.' });
-    }
+    if (!headers.length) return res.status(404).json({ error: 'Adjustment not found.' });
 
     const [items] = await pool.query(
       `SELECT
@@ -298,7 +263,7 @@ router.get('/:adjustmentId', async (req, res) => {
       [adjustmentId]
     );
 
-    const [header] = await enrichAdjustmentApprovals(pool, [headers[0]]);
+    const header = headers[0];
     res.json({
       adjustment: {
         ...header,
@@ -313,7 +278,7 @@ router.get('/:adjustmentId', async (req, res) => {
   }
 });
 
-router.post('/returns', requireCashierSaleOwnership, requireActionApproval('sale_adjustment'), async (req, res) => {
+router.post('/returns', async (req, res) => {
   let requestId;
   try {
     requestId = normalizeRequestId(req.body.adjustmentRequestId);
@@ -458,7 +423,7 @@ router.post('/returns', requireCashierSaleOwnership, requireActionApproval('sale
       }
 
       await recordAuditLog(connection, {
-        adminId: req.user.id, actorRole: req.user.role,
+        adminId: req.user.id,
         action: 'sale.return',
         entityType: 'sale_adjustment',
         entityId: adjustmentId,
@@ -480,8 +445,6 @@ router.post('/returns', requireCashierSaleOwnership, requireActionApproval('sale
           refund_method: refundMethod,
           refund_reference: refundReference,
           cashier_shift_id: shiftId,
-          operator_user_id: req.user.id, operator_role: req.user.role, approval: req.managerApproval || { status: 'not_required' },
-          approved_by_manager_id: req.managerApproval?.id || (req.user.role === 'super_admin' ? req.user.id : null),
           item_count: processedItems.length,
           returned_quantity: processedItems.reduce((sum, item) => sum + item.quantity, 0),
           restocked_quantity: processedItems.reduce((sum, item) => sum + (item.restockable ? item.quantity : 0), 0),
@@ -529,7 +492,7 @@ router.post('/returns', requireCashierSaleOwnership, requireActionApproval('sale
   }
 });
 
-router.post('/voids', requireCashierSaleOwnership, requireActionApproval('sale_adjustment'), async (req, res) => {
+router.post('/voids', async (req, res) => {
   let requestId;
   try {
     requestId = normalizeRequestId(req.body.adjustmentRequestId);
@@ -646,7 +609,7 @@ router.post('/voids', requireCashierSaleOwnership, requireActionApproval('sale_a
       }
 
       await recordAuditLog(connection, {
-        adminId: req.user.id, actorRole: req.user.role,
+        adminId: req.user.id,
         action: 'sale.void',
         entityType: 'sale_adjustment',
         entityId: adjustmentId,
@@ -666,8 +629,6 @@ router.post('/voids', requireCashierSaleOwnership, requireActionApproval('sale_a
           refund_method: refundMethod,
           refund_reference: refundReference,
           cashier_shift_id: shiftId,
-          operator_user_id: req.user.id, operator_role: req.user.role, approval: req.managerApproval || { status: 'not_required' },
-          approved_by_manager_id: req.managerApproval?.id || (req.user.role === 'super_admin' ? req.user.id : null),
           restocked_quantity: snapshot.items.reduce((sum, item) => sum + item.sold_quantity, 0),
         },
         reason,

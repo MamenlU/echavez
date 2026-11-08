@@ -173,7 +173,7 @@ export function PurchaseOrdersPanel({ onReceiveItem }: PurchaseOrdersPanelProps)
         Authorization: `Bearer ${token}`,
       },
     });
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.assign('/login');

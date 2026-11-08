@@ -10,7 +10,6 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { approvalDescription, staffIdentity } from '../utils/staffIdentity';
 
 type AdjustmentMode = 'Return' | 'Void';
 
@@ -97,10 +96,6 @@ type AdjustmentHistoryRow = {
   processed_at: string;
   processed_by: string | null;
   processed_by_username: string;
-  processed_by_admin_id?: number;
-  processed_by_role?: string | null;
-  shift_id?: number | null;
-  approval?: {status?: string | null; id?: number | null; name?: string | null; role?: string | null} | null;
   total_quantity: number;
   restocked_quantity: number;
   non_restocked_quantity: number;
@@ -128,7 +123,6 @@ type AdjustmentDetail = {
 
 interface SalesAdjustmentPanelProps {
   onChanged?: () => void | Promise<void>;
-  cashierMode?: boolean;
 }
 
 const formatPeso = (value: number | string | null | undefined) =>
@@ -159,7 +153,7 @@ const createRequestId = () => {
 const requiresExternalConfirmation = (method: string) =>
   method.trim().toLowerCase() !== 'cash';
 
-export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAdjustmentPanelProps) {
+export function SalesAdjustmentPanel({ onChanged }: SalesAdjustmentPanelProps) {
   const [sales, setSales] = useState<SalesHistoryRow[]>([]);
   const [adjustments, setAdjustments] = useState<AdjustmentHistoryRow[]>([]);
   const [search, setSearch] = useState('');
@@ -182,9 +176,6 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
   const [success, setSuccess] = useState('');
   const [detail, setDetail] = useState<AdjustmentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [managerUsername, setManagerUsername] = useState('');
-  const [managerPassword, setManagerPassword] = useState('');
-  const needsApproval = true; // every adjustment requires scoped step-up verification
 
   const token = () => localStorage.getItem('token');
 
@@ -207,7 +198,7 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
         Authorization: `Bearer ${authToken}`,
       },
     });
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       handleSessionExpired();
       throw new Error('Admin session expired.');
     }
@@ -219,7 +210,7 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
     setError('');
     try {
       const [salesResponse, adjustmentResponse] = await Promise.all([
-        authorizedFetch(cashierMode ? '/api/sales/my-pos' : '/api/sales/history'),
+        authorizedFetch('/api/sales/history'),
         authorizedFetch('/api/sale-adjustments?limit=200'),
       ]);
       const salesData = await salesResponse.json().catch(() => ({}));
@@ -352,9 +343,6 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
       return;
     }
 
-    if (needsApproval && (!managerUsername.trim() || !managerPassword)) {
-      setError('Manager username and password are required for returns/refunds.'); return;
-    }
     setSubmitting(true);
     setError('');
     setSuccess('');
@@ -372,14 +360,12 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
           serviceFeeRefundAmount: Number(serviceFeeRefundAmount || 0),
           deliveryFeeRefundAmount: Number(deliveryFeeRefundAmount || 0),
           items,
-          ...(needsApproval ? { managerUsername: managerUsername.trim(), managerPassword } : {}),
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to record return/refund.');
       const successMessage = `${data.adjustmentReference || 'Return'} recorded successfully. Refund: ${formatPeso(data.totalRefundAmount)}.`;
       setRequestId(createRequestId());
-      setManagerPassword('');
       await resetAfterSuccess(eligibility.sale_id);
       setSuccess(successMessage);
     } catch (submitError) {
@@ -400,9 +386,6 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
       return;
     }
 
-    if (needsApproval && (!managerUsername.trim() || !managerPassword)) {
-      setError('Manager username and password are required for voiding a sale.'); return;
-    }
     setSubmitting(true);
     setError('');
     setSuccess('');
@@ -417,14 +400,12 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
           refundMethod,
           refundReference: refundReference.trim(),
           externalRefundConfirmed,
-          ...(needsApproval ? { managerUsername: managerUsername.trim(), managerPassword } : {}),
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to void POS sale.');
       const successMessage = `${data.adjustmentReference || 'Void'} recorded successfully. Refund: ${formatPeso(data.totalRefundAmount)}.`;
       setRequestId(createRequestId());
-      setManagerPassword('');
       await resetAfterSuccess(eligibility.sale_id);
       setSuccess(successMessage);
     } catch (submitError) {
@@ -756,15 +737,6 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
               )}
 
               <div className="grid gap-3 border-t border-steel-100 pt-4 sm:grid-cols-2">
-                {needsApproval && <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-                  <p className="text-xs font-bold text-amber-900">{cashierMode ? 'Admin/Super Admin' : 'Super Admin'} verification required before this adjustment</p>
-                  <input aria-label="Manager username for adjustment" placeholder="Manager username or email"
-                    autoComplete="off" value={managerUsername} onChange={e => setManagerUsername(e.target.value)}
-                    className="w-full rounded-lg border p-2 text-sm" />
-                  <input aria-label="Manager password for adjustment" placeholder="Manager password"
-                    type="password" autoComplete="off" value={managerPassword}
-                    onChange={e => setManagerPassword(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
-                </div>}
                 <label className="text-xs font-semibold text-steel-700 sm:col-span-2">
                   3. Reason / business justification
                   <textarea
@@ -889,7 +861,7 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
                     <td className="min-w-[220px] px-4 py-3 text-steel-600">{adjustment.items_summary}</td>
                     <td className="px-4 py-3 font-bold text-red-700">{formatPeso(adjustment.total_refund_amount)}</td>
                     <td className="px-4 py-3 text-steel-600">{adjustment.refund_method}</td>
-                    <td className="px-4 py-3 text-steel-600">{staffIdentity(adjustment.processed_by || adjustment.processed_by_username, adjustment.processed_by_role, adjustment.processed_by_admin_id)}<p className="mt-1 text-[10px] text-slate-500">Approval: {approvalDescription(adjustment.approval)}</p></td>
+                    <td className="px-4 py-3 text-steel-600">{adjustment.processed_by?.trim() || adjustment.processed_by_username}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
@@ -926,11 +898,7 @@ export function SalesAdjustmentPanel({ onChanged, cashierMode = false }: SalesAd
                 <div className="rounded-xl bg-steel-50 p-3"><p className="text-[9px] uppercase text-steel-400">Refund</p><p className="mt-1 font-bold">{formatPeso(detail.adjustment.total_refund_amount)}</p></div>
                 <div className="rounded-xl bg-steel-50 p-3"><p className="text-[9px] uppercase text-steel-400">Method</p><p className="mt-1 font-bold">{detail.adjustment.refund_method}</p></div>
                 <div className="rounded-xl bg-steel-50 p-3"><p className="text-[9px] uppercase text-steel-400">Reference</p><p className="mt-1 break-all font-bold">{detail.adjustment.refund_reference || '—'}</p></div>
-                <div className="rounded-xl bg-steel-50 p-3"><p className="text-[9px] uppercase text-steel-400">Processed By</p><p className="mt-1 font-bold">{staffIdentity(detail.adjustment.processed_by || detail.adjustment.processed_by_username, detail.adjustment.processed_by_role, detail.adjustment.processed_by_admin_id)}</p></div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-3 text-xs"><strong>Verified Approver:</strong> {approvalDescription(detail.adjustment.approval)}</div>
-                <div className="rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-3 text-xs"><strong>Refund Shift:</strong> {detail.adjustment.shift_id ? `#${detail.adjustment.shift_id} (processor's shift)` : 'No shift assigned'}</div>
+                <div className="rounded-xl bg-steel-50 p-3"><p className="text-[9px] uppercase text-steel-400">Processed By</p><p className="mt-1 font-bold">{detail.adjustment.processed_by?.trim() || detail.adjustment.processed_by_username}</p></div>
               </div>
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                 <strong>Reason:</strong> {detail.adjustment.reason}

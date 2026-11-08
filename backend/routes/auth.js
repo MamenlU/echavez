@@ -1,5 +1,4 @@
-import { authenticateToken, requireAdmin, requireSuperAdmin, requireCurrentAccount } from '../middleware/auth.js';
-import { recordAuditLog } from '../lib/auditService.js';
+import { authenticateToken } from '../middleware/auth.js';
 
 import express from 'express';
 
@@ -1005,7 +1004,7 @@ router.post('/forgot-password', async (req, res) => {
 
              (user_id, token_hash, expires_at)
 
-             VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))`,
+             VALUES (?, ?, NOW() + INTERVAL '15 minutes')`,
 
             [user.id, tokenHash]
 
@@ -3755,168 +3754,7 @@ return res
 
 // Load the authenticated user's current profile from the database.
 
-// Staff accounts cannot be self-registered. Only an authenticated Admin can provision Cashiers.
-router.get('/staff/cashiers', authenticateToken, requireSuperAdmin, async (_req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT id, username, email, first_name, last_name, status, created_at, last_login
-       FROM users WHERE role = 'cashier' ORDER BY id DESC LIMIT 100`
-    );
-    return res.json({ cashiers: rows });
-  } catch (error) {
-    console.error('Cashier listing error:', error);
-    return res.status(500).json({ error: 'Unable to list Cashier accounts.' });
-  }
-});
-
-router.post('/staff/cashiers', authenticateToken, requireSuperAdmin, async (req, res) => {
-  const username = String(req.body?.username || '').trim();
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const firstName = String(req.body?.firstName || '').trim();
-  const lastName = String(req.body?.lastName || '').trim();
-  const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!/^[a-zA-Z0-9_.-]{3,50}$/.test(username)
-    || email.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    || firstName.length > 50 || lastName.length > 50
-    || getStrongPasswordMissingRequirements(password).length > 0 || password.length > 256) {
-    return res.status(400).json({ error: 'Valid username, email and strong password are required.' });
-  }
-  let connection;
-  try {
-    const hash = await bcrypt.hash(password, 12);
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-    const [result] = await connection.query(
-      `INSERT INTO users (username, email, password_hash, role, first_name, last_name, status)
-       VALUES (?, ?, ?, 'cashier', ?, ?, 'active')`,
-      [username, email, hash, firstName || null, lastName || null]
-    );
-    await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role, action: 'staff.cashier.create', entityType: 'user',
-      entityId: result.insertId, summary: `Created Cashier account ${username}.`,
-      after: { id: result.insertId, username, role: 'cashier', status: 'active', actor_role: req.user.role },
-    });
-    await connection.commit();
-    return res.status(201).json({ message: 'Cashier account created.',
-      cashier: { id: result.insertId, username, email, role: 'cashier', status: 'active' } });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Username or email already exists.' });
-    console.error('Cashier provisioning error:', error);
-    return res.status(500).json({ error: 'Unable to create Cashier account. Check the approved role migration.' });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-router.patch('/staff/cashiers/:id/status', authenticateToken, requireSuperAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  const status = req.body?.status;
-  if (!Number.isSafeInteger(id) || id <= 0 || !['active', 'inactive'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid Cashier or status.' });
-  }
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-    const [rows] = await connection.query('SELECT role, status, username FROM users WHERE id = ? FOR UPDATE', [id]);
-    if (!rows.length || rows[0].role !== 'cashier') {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Cashier account not found.' });
-    }
-    await connection.query("UPDATE users SET status = ? WHERE id = ? AND role = 'cashier'", [status, id]);
-    await recordAuditLog(connection, { adminId: req.user.id, actorRole: req.user.role, action: 'staff.cashier.status',
-      entityType: 'user', entityId: id, summary: `Updated Cashier ${rows[0].username} to ${status}.`,
-      before: { status: rows[0].status }, after: { status, actor_role: req.user.role } });
-    await connection.commit();
-    return res.json({ message: 'Cashier status updated.', id, status });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error('Cashier status error:', error);
-    return res.status(500).json({ error: 'Unable to update Cashier status.' });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-// Only Super Admin can provision/deactivate ordinary Admin accounts.
-// The Super Admin role itself cannot be publicly created or promoted via API.
-router.get('/staff/admins', authenticateToken, requireSuperAdmin, async (_req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT id, username, email, first_name, last_name, status, created_at, last_login
-       FROM users WHERE role = 'admin' ORDER BY id DESC LIMIT 100`
-    );
-    return res.json({ admins: rows });
-  } catch (error) {
-    console.error('Admin staff list error:', error);
-    return res.status(500).json({ error: 'Unable to list Admin accounts.' });
-  }
-});
-
-router.post('/staff/admins', authenticateToken, requireSuperAdmin, async (req, res) => {
-  const username = String(req.body?.username || '').trim();
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const firstName = String(req.body?.firstName || '').trim();
-  const lastName = String(req.body?.lastName || '').trim();
-  const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!/^[a-zA-Z0-9_.-]{3,50}$/.test(username)
-    || email.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    || firstName.length > 50 || lastName.length > 50
-    || getStrongPasswordMissingRequirements(password).length > 0 || password.length > 256) {
-    return res.status(400).json({ error: 'Valid username, email and strong password are required.' });
-  }
-  let connection;
-  try {
-    const hash = await bcrypt.hash(password, 12);
-    connection = await pool.getConnection(); await connection.beginTransaction();
-    const [result] = await connection.query(
-      `INSERT INTO users (username, email, password_hash, role, first_name, last_name, status)
-       VALUES (?, ?, ?, 'admin', ?, ?, 'active')`,
-      [username, email, hash, firstName || null, lastName || null]
-    );
-    await recordAuditLog(connection, { adminId: req.user.id, actorRole: req.user.role,
-      action: 'staff.admin.create', entityType: 'user', entityId: result.insertId,
-      summary: `Created Admin account ${username}.`,
-      after: { id: result.insertId, username, role: 'admin', status: 'active', actor_role: req.user.role } });
-    await connection.commit();
-    return res.status(201).json({ message: 'Admin account created.',
-      admin: { id: result.insertId, username, email, role: 'admin', status: 'active' } });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Username or email already exists.' });
-    console.error('Admin provisioning error:', error);
-    return res.status(500).json({ error: 'Unable to create Admin account.' });
-  } finally { if (connection) connection.release(); }
-});
-
-router.patch('/staff/admins/:id/status', authenticateToken, requireSuperAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  const status = req.body?.status;
-  if (!Number.isSafeInteger(id) || id <= 0 || !['active', 'inactive'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid Admin account or status.' });
-  }
-  let connection;
-  try {
-    connection = await pool.getConnection(); await connection.beginTransaction();
-    const [rows] = await connection.query('SELECT role, status, username FROM users WHERE id = ? FOR UPDATE', [id]);
-    if (!rows.length || rows[0].role !== 'admin') {
-      await connection.rollback(); return res.status(404).json({ error: 'Admin account not found.' });
-    }
-    await connection.query("UPDATE users SET status = ? WHERE id = ? AND role = 'admin'", [status, id]);
-    await recordAuditLog(connection, { adminId: req.user.id, actorRole: req.user.role,
-      action: 'staff.admin.status', entityType: 'user', entityId: id,
-      summary: `Updated Admin ${rows[0].username} to ${status}.`,
-      before: { status: rows[0].status }, after: { status, actor_role: req.user.role } });
-    await connection.commit(); return res.json({ message: 'Admin status updated.', id, status });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error('Admin status error:', error);
-    return res.status(500).json({ error: 'Unable to update Admin status.' });
-  } finally { if (connection) connection.release(); }
-});
-
-router.get('/profile', authenticateToken, requireCurrentAccount, async (req, res) => {
+router.get('/profile', authenticateToken, async (req, res) => {
 
     try {
 
@@ -3955,7 +3793,6 @@ router.put(
     '/profile',
 
     authenticateToken,
-    requireCurrentAccount,
 
     async (req, res) => {
 

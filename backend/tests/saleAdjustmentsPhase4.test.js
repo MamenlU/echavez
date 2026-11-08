@@ -66,9 +66,8 @@ test('non-cash refund methods require external verification while cash does not'
   assert.equal(requiresExternalRefundConfirmation('PayMongo'), true);
 });
 
-test('returns and voids require manager verification for cashiers, remain transactional and audited', () => {
-  assert.match(route, /router\.use\(authenticateToken, requirePosStaff\)/);
-  assert.match(route, /requireCashierSaleOwnership, requireActionApproval\('sale_adjustment'\)/);
+test('return and void endpoints are admin-only, idempotent, transactional, audited, and do not call PayMongo', () => {
+  assert.match(route, /router\.use\(authenticateToken, requireAdmin\)/);
   assert.match(route, /router\.post\('\/returns'/);
   assert.match(route, /router\.post\('\/voids'/);
   assert.match(route, /adjustment_request_id/);

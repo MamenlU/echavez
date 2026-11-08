@@ -8,18 +8,12 @@ import {
   RefreshCw,
   Wallet,
 } from 'lucide-react';
-import { approvalDescription, staffIdentity } from '../utils/staffIdentity';
 
 interface CashierShift {
   shift_id: number;
   admin_id: number;
   admin_name?: string | null;
   admin_username?: string | null;
-  admin_role?: string | null;
-  shift_owner_name?: string | null;
-  shift_owner_role?: string | null;
-  opening_approval?: { status: string; id: number | null; name: string | null; role: string | null } | null;
-  closing_approval?: { status: string; id: number | null; name: string | null; role: string | null } | null;
   status: 'Open' | 'Closed';
   opened_at: string;
   closed_at: string | null;
@@ -46,7 +40,6 @@ interface ShiftHistoryResponse {
 
 interface CashierShiftPanelProps {
   onGoToPos: () => void;
-  cashierMode?: boolean;
 }
 
 const formatPeso = (value: number | null | undefined) =>
@@ -84,7 +77,7 @@ const authFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     },
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     window.location.assign('/login');
@@ -116,7 +109,7 @@ function SummaryCard({
   );
 }
 
-export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShiftPanelProps) {
+export function CashierShiftPanel({ onGoToPos }: CashierShiftPanelProps) {
   const [current, setCurrent] = useState<CashierShift | null>(null);
   const [history, setHistory] = useState<CashierShift[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,14 +120,6 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
   const [openNotes, setOpenNotes] = useState('');
   const [actualCash, setActualCash] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
-  const [managerUsername, setManagerUsername] = useState('');
-  const [managerPassword, setManagerPassword] = useState('');
-  const actorRole = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}').role as string; } catch { return ''; } })();
-  const approvalRequirement = actorRole === 'cashier'
-    ? 'Admin or Super Admin approval (different account)'
-    : actorRole === 'super_admin'
-      ? 'Super Admin fresh password verification (own account)'
-      : 'Super Admin approval (different account)';
 
   const loadAll = async () => {
     setLoading(true);
@@ -182,27 +167,22 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
       return;
     }
 
-    if (!managerUsername.trim() || !managerPassword.trim()) {
-      setError(`${approvalRequirement} is required to open this shift. Enter both credentials.`); return;
-    }
     setSubmitting(true);
     try {
       const response = await authFetch('/api/cashier-shifts/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ openingCash: amount, notes: openNotes.trim(),
-          managerUsername: managerUsername.trim(), managerPassword }),
+        body: JSON.stringify({ openingCash: amount, notes: openNotes.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to open Cashier Shift.');
       setSuccess('Cashier Shift opened. New POS sales can now be recorded under this shift.');
       setOpeningCash('');
-      setOpenNotes(''); setManagerPassword('');
+      setOpenNotes('');
       await loadAll();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to open Cashier Shift.');
     } finally {
-      setManagerPassword('');
       setSubmitting(false);
     }
   };
@@ -218,34 +198,22 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
       return;
     }
 
-    if (reconciliationPreview && reconciliationPreview.discrepancy !== 0 && !closeNotes.trim()) {
-      setError('Explain the cash shortage or overage before closing your shift.');
-      return;
-    }
-
-    if ((!managerUsername.trim() || !managerPassword.trim())) {
-      setError(`${approvalRequirement} is required to close this shift. Enter the required credentials.`);
-      return;
-    }
     setSubmitting(true);
     try {
       const response = await authFetch(`/api/cashier-shifts/${current.shift_id}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actualCash: amount, notes: closeNotes.trim(),
-          managerUsername: managerUsername.trim(), managerPassword }),
+        body: JSON.stringify({ actualCash: amount, notes: closeNotes.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Unable to close Cashier Shift.');
       setSuccess(`Cashier Shift #${current.shift_id} closed and reconciled successfully.`);
       setActualCash('');
       setCloseNotes('');
-      setManagerPassword('');
       await loadAll();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to close Cashier Shift.');
     } finally {
-      setManagerPassword('');
       setSubmitting(false);
     }
   };
@@ -257,7 +225,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
           <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Cash Control</p>
           <h2 className="mt-1 font-display text-2xl font-extrabold text-[#17372D]">Cashier Shift &amp; Cash Reconciliation</h2>
           <p className="mt-1 max-w-4xl text-sm text-[#71817A]">
-            Record the opening drawer balance, group POS and eligible staff-completed pickup transactions into a shift, and compare expected cash with the actual cash counted at closing.
+            Record the opening drawer balance, group new Onsite POS transactions into a shift, and compare expected cash with the actual cash counted at closing.
           </p>
         </div>
         <button
@@ -272,7 +240,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
       </div>
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
-        <span className="font-bold">Cash-control rule:</span> opening cash is not sales revenue. Expected drawer cash is Opening Cash + Cash POS and Pickup Sales − Cash Refunds − Cash Drawer Expenses. Card sales are shown for shift reporting but do not increase the physical cash drawer. Historical pre-Phase-7 sales remain valid with no shift assignment.
+        <span className="font-bold">Cash-control rule:</span> opening cash is not sales revenue. Expected drawer cash is Opening Cash + Cash POS Sales − Cash Refunds − Cash Drawer Expenses. Card sales are shown for shift reporting but do not increase the physical cash drawer. Historical pre-Phase-7 sales remain valid with no shift assignment.
       </div>
 
       {error && (
@@ -297,7 +265,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
               </div>
             </div>
             <div className="mt-5 rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-4 text-xs leading-5 text-[#52635B]">
-              POS sales and eligible Cashier-completed online pickups are linked to the operating shift. Paid online pickup cash is counted once in expected drawer cash. Cash refunds and Cash Drawer expenses also affect reconciliation.
+              Online orders do not belong to a cashier shift. Phase 7 only links new <strong>Onsite POS</strong> sales to the Admin's open shift. Cash refunds also require an open shift so drawer cash remains reconcilable.
             </div>
           </div>
 
@@ -325,13 +293,6 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
                 className="mt-1.5 w-full resize-none rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/15"
               />
             </label>
-            {<div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <p className="text-xs font-bold text-amber-900">{approvalRequirement} required before shift opening</p>
-              <input aria-label="Opening approver username" placeholder="Approver / verifying Super Admin username" autoComplete="off"
-                value={managerUsername} onChange={e => setManagerUsername(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
-              <input aria-label="Opening approver password" type="password" placeholder="Approver password" autoComplete="off"
-                value={managerPassword} onChange={e => setManagerPassword(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
-            </div>}
             <button
               type="submit"
               disabled={submitting}
@@ -351,8 +312,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
                   <span className="text-xs font-bold text-[#52635B]">Shift #{current.shift_id}</span>
                 </div>
                 <h3 className="mt-2 font-display text-xl font-extrabold text-[#17372D]">Current Cashier Shift</h3>
-                <p className="mt-1 text-xs text-[#71817A]">Opened {formatDateTime(current.opened_at)} · Shift Owner: {staffIdentity(current.shift_owner_name || current.admin_name || current.admin_username, current.shift_owner_role || current.admin_role, current.admin_id)}</p>
-                <p className="mt-1 text-xs text-[#52635B]">Opening authorization: {approvalDescription(current.opening_approval)}</p>
+                <p className="mt-1 text-xs text-[#71817A]">Opened {formatDateTime(current.opened_at)} · {current.admin_name || current.admin_username || 'Admin'}</p>
               </div>
               <button type="button" onClick={onGoToPos} className="rounded-xl bg-[#2F7D5A] px-4 py-2.5 text-xs font-bold text-white transition hover:bg-[#256548]">
                 Go to POS / New Sale
@@ -361,12 +321,12 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
 
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-7">
               <SummaryCard label="Opening Cash" value={formatPeso(current.opening_cash)} icon={<Wallet className="h-4 w-4" />} />
-              <SummaryCard label="Cash Sales in Shift" value={formatPeso(current.cash_sales_amount)} icon={<Banknote className="h-4 w-4" />} />
-              <SummaryCard label="Card Sales in Shift" value={formatPeso(current.card_sales_amount)} icon={<CreditCard className="h-4 w-4" />} />
+              <SummaryCard label="Cash POS Sales" value={formatPeso(current.cash_sales_amount)} icon={<Banknote className="h-4 w-4" />} />
+              <SummaryCard label="Card POS Sales" value={formatPeso(current.card_sales_amount)} icon={<CreditCard className="h-4 w-4" />} />
               <SummaryCard label="Cash Refunds" value={formatPeso(current.cash_refunds_amount)} icon={<RefreshCw className="h-4 w-4" />} />
               <SummaryCard label="Cash Drawer Expenses" value={formatPeso(current.cash_expenses_amount)} icon={<Wallet className="h-4 w-4" />} />
               <SummaryCard label="Expected Cash" value={formatPeso(current.expected_cash)} icon={<Banknote className="h-4 w-4" />} emphasis />
-              <SummaryCard label="Shift Transactions" value={String(current.pos_transaction_count || 0)} icon={<Clock className="h-4 w-4" />} />
+              <SummaryCard label="POS Transactions" value={String(current.pos_transaction_count || 0)} icon={<Clock className="h-4 w-4" />} />
             </div>
           </section>
 
@@ -378,7 +338,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
               </p>
               <div className="mt-4 rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-4 text-xs text-[#52635B]">
                 <div className="flex justify-between gap-3"><span>Opening Cash</span><strong>{formatPeso(current.opening_cash)}</strong></div>
-                <div className="mt-2 flex justify-between gap-3"><span>+ Cash Sales in Shift</span><strong>{formatPeso(current.cash_sales_amount)}</strong></div>
+                <div className="mt-2 flex justify-between gap-3"><span>+ Cash POS Sales</span><strong>{formatPeso(current.cash_sales_amount)}</strong></div>
                 <div className="mt-2 flex justify-between gap-3"><span>− Cash Refunds</span><strong>{formatPeso(current.cash_refunds_amount)}</strong></div>
                 <div className="mt-2 flex justify-between gap-3"><span>− Cash Drawer Expenses</span><strong>{formatPeso(current.cash_expenses_amount)}</strong></div>
                 <div className="mt-3 border-t border-[#DDE6E0] pt-3 flex justify-between gap-3 text-[#17372D]"><span className="font-bold">Expected Cash</span><strong>{formatPeso(current.expected_cash)}</strong></div>
@@ -411,7 +371,7 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
               )}
 
               <label className="block text-xs font-bold text-[#34463F]">
-                Closing Note (required for cash shortage or overage)
+                Closing Note (optional)
                 <textarea
                   rows={2}
                   maxLength={500}
@@ -421,15 +381,6 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
                   className="mt-1.5 w-full resize-none rounded-xl border border-[#DDE6E0] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/15"
                 />
               </label>
-              {(cashierMode || actorRole === 'admin' || actorRole === 'super_admin') && <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs font-bold text-amber-900">{approvalRequirement} required for closing</p>
-                <input aria-label="Manager username for shift approval" autoComplete="off" placeholder="Manager username or email"
-                  value={managerUsername} onChange={e => setManagerUsername(e.target.value)}
-                  className="w-full rounded-lg border p-2 text-sm" />
-                <input aria-label="Manager password for shift approval" type="password" autoComplete="off"
-                  placeholder="Manager password" value={managerPassword}
-                  onChange={e => setManagerPassword(e.target.value)} className="w-full rounded-lg border p-2 text-sm" />
-              </div>}
               <button
                 type="submit"
                 disabled={submitting}
@@ -452,7 +403,6 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
             <thead className="bg-[#F3F8F5] text-[10px] font-extrabold uppercase tracking-[0.1em] text-[#66766F]">
               <tr>
                 <th className="px-4 py-3">Shift</th>
-                <th className="px-4 py-3">Shift Owner / Verification</th>
                 <th className="px-4 py-3">Opened / Closed</th>
                 <th className="px-4 py-3 text-right">Opening</th>
                 <th className="px-4 py-3 text-right">Cash Sales</th>
@@ -466,13 +416,12 @@ export function CashierShiftPanel({ onGoToPos, cashierMode = false }: CashierShi
             </thead>
             <tbody>
               {history.length === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-sm text-[#71817A]">No Cashier Shift history yet.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-[#71817A]">No Cashier Shift history yet.</td></tr>
               ) : history.map((shift) => {
                 const discrepancy = shift.discrepancy === null ? null : Number(shift.discrepancy);
                 return (
                   <tr key={shift.shift_id} className="border-t border-[#EDF2EF] text-[#34463F]">
                     <td className="px-4 py-3 font-bold text-[#17372D]">#{shift.shift_id}</td>
-                    <td className="min-w-[205px] px-4 py-3"><p className="font-semibold">{staffIdentity(shift.shift_owner_name || shift.admin_name || shift.admin_username, shift.shift_owner_role || shift.admin_role, shift.admin_id)}</p><p className="mt-1 text-[10px] text-[#52635B]">Open: {approvalDescription(shift.opening_approval)}</p><p className="mt-1 text-[10px] text-[#52635B]">Close: {approvalDescription(shift.closing_approval)}</p></td>
                     <td className="px-4 py-3"><div>{formatDateTime(shift.opened_at)}</div><div className="mt-1 text-[10px] text-[#8A9892]">{shift.closed_at ? formatDateTime(shift.closed_at) : 'Still open'}</div></td>
                     <td className="px-4 py-3 text-right font-semibold">{formatPeso(shift.opening_cash)}</td>
                     <td className="px-4 py-3 text-right">{shift.cash_sales_amount === null ? '—' : formatPeso(shift.cash_sales_amount)}</td>

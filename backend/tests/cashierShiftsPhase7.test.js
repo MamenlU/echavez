@@ -48,9 +48,8 @@ test('cash reconciliation formula uses opening cash plus cash sales minus cash r
   assert.throws(() => normalizeCashAmount(-1, 'Opening cash'), /non-negative/);
 });
 
-test('Cashier Shift API is staff-gated, manager-approved for cashier close, transactional and audited', () => {
-  assert.match(route, /router\.use\(authenticateToken, requirePosStaff\)/);
-  assert.match(route, /router\.post\('\/:shiftId\/close', requireActionApproval\('shift_close'\)/);
+test('Cashier Shift API is Admin-only, transactional, audited, and stores close snapshots', () => {
+  assert.match(route, /router\.use\(authenticateToken, requireAdmin\)/);
   assert.match(route, /router\.post\('\/open'/);
   assert.match(route, /router\.post\('\/:shiftId\/close'/);
   assert.match(route, /beginTransaction\(\)/);
@@ -84,7 +83,7 @@ test('cash refunds and POS voids require an open shift while verified non-cash r
 });
 
 test('shift metrics count only linked POS sales and cash refunds for drawer reconciliation', () => {
-  assert.match(service, /FROM sales[\s\S]*WHERE shift_id = \?[\s\S]*sales_source IN \('Onsite POS', 'Online Order'\)/);
+  assert.match(service, /FROM sales[\s\S]*WHERE shift_id = \?[\s\S]*sales_source = 'Onsite POS'/);
   assert.match(service, /payment_method[\s\S]*cash/);
   assert.match(service, /FROM sale_adjustments[\s\S]*WHERE shift_id = \?/);
   assert.match(service, /refund_method = 'Cash'/);
@@ -96,7 +95,7 @@ test('Admin UI exposes Cashier Shift, POS shift status, and clear reconciliation
   assert.match(dashboard, /<CashierShiftPanel/);
   assert.match(dashboard, /<CashierShiftStatusBanner/);
   assert.match(panel, /Cashier Shift &amp; Cash Reconciliation/);
-  assert.match(panel, /Opening Cash \+ Cash POS and Pickup Sales − Cash Refunds/);
+  assert.match(panel, /Opening Cash \+ Cash POS Sales − Cash Refunds/);
   assert.match(panel, /Card sales are shown for shift reporting but do not increase the physical cash drawer/);
   assert.match(panel, /historical pre-Phase-7 sales remain valid/i);
 });

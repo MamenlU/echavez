@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getStoredSession } from '../utils/authSession';
-import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -97,7 +95,7 @@ const groups: NavGroup[] = [
     key: 'finance',
     label: 'Finance & Reports',
     items: [
-      { tab: 'expenses', label: 'Operating Expenses', title: 'Store Operating Expenses', icon: CircleDollarSign },
+      { tab: 'expenses', label: 'Expense Management', title: 'Expense Management & Estimated Net Profit', icon: CircleDollarSign },
       { tab: 'sales', label: 'Sales History', title: 'Sales History', icon: FileBarChart },
       { tab: 'movementHistory', label: 'Inventory Movements', title: 'Inventory Movements', icon: ArrowLeftRight },
       { tab: 'reports', label: 'Reports Center', title: 'Reports Center', icon: FileBarChart },
@@ -261,10 +259,6 @@ export function AdminSidebar({
         })}
       </nav>
 
-      {getStoredSession()?.user.role === 'super_admin' && <Link to="/admin/cashiers" title="Manage Staff accounts"
-        className="mt-2 flex items-center gap-3 rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-emerald-100 hover:bg-white/10">
-        <UsersRound className="h-4 w-4 shrink-0" /><span className={isCollapsed ? 'lg:hidden' : ''}>Staff Accounts</span>
-      </Link>}
       {!isCollapsed && (
         <div className="mt-2 shrink-0 rounded-xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.035))] px-3 py-2.5 shadow-[0_12px_30px_-24px_rgba(0,0,0,0.7)]">
           <div className="flex items-center gap-2.5">

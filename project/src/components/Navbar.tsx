@@ -1,4 +1,5 @@
 import {
+  clearStoredSession,
   getStoredSession,
   type StoredUser,
 } from '../utils/authSession';
@@ -212,11 +213,15 @@ export function Navbar() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearStoredSession();
+    localStorage.removeItem('customer_cart');
     setUser(null);
+    setCartCount(0);
+    setOpen(false);
+    setAdminMenuOpen(false);
     window.dispatchEvent(new Event('storage'));
-    window.location.href = '/';
+    navigate('/', { replace: true });
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   };
 
   const isCustomerDashboard = Boolean(isDashboard && user?.role === 'customer');
@@ -240,8 +245,7 @@ export function Navbar() {
   isPromosPage ||
   isAuthPage ||
   isCustomerDashboard ||
-  isAdminDashboard ||
-  isCashierDashboard;
+  isAdminDashboard;
   const usesWideMenu = isCustomerNavigation || isPublicStorefront || isPublicPromos;
 
   const openCustomerTab = (tab: string) => {
@@ -671,11 +675,6 @@ const dashboardTabClass = (tab: string) =>
                     </div>
                   )}
                 </div>
-              </div>
-            ) : user.role === 'cashier' ? (
-              <div className="hidden items-center gap-3 lg:flex">
-                <Link to="/cashier/dashboard" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white">Cashier POS</Link>
-                <button type="button" onClick={handleLogout} className="rounded-lg border px-4 py-2 text-sm font-semibold text-emerald-800">Logout</button>
               </div>
             ) : (
               <div className={`hidden items-center gap-2 ${isPublicPromos ? 'xl:flex' : 'lg:flex'}`}>

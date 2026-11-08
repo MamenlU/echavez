@@ -304,7 +304,7 @@ router.post('/', async (req, res) => {
     await insertItems(connection, result.insertId, items);
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'purchase_order.create',
       entityType: 'purchase_order',
       entityId: result.insertId,
@@ -383,7 +383,7 @@ router.put('/:id', async (req, res) => {
     await insertItems(connection, purchaseOrderId, items);
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'purchase_order.update',
       entityType: 'purchase_order',
       entityId: purchaseOrderId,
@@ -451,7 +451,7 @@ router.post('/:id/order', async (req, res) => {
       [req.user.id, purchaseOrderId]
     );
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'purchase_order.order',
       entityType: 'purchase_order',
       entityId: purchaseOrderId,
@@ -506,7 +506,7 @@ router.post('/:id/cancel', async (req, res) => {
     );
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'purchase_order.cancel',
       entityType: 'purchase_order',
       entityId: purchaseOrderId,

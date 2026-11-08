@@ -89,11 +89,8 @@ test('product create, update/price change, and activation status are centrally a
   assert.match(productsRoute, /recordAuditLog\(connection/);
 });
 
-test('Audit Logs API separates sanitized personal activity from manager-only full history', () => {
-  assert.match(auditRoute, /router\.use\(authenticateToken, requirePosStaff\)/);
-  assert.match(auditRoute, /router\.get\('\/mine'/);
-  assert.match(auditRoute, /WHERE admin_id = \?/);
-  assert.match(auditRoute, /router\.use\(requireAdmin\)/);
+test('Audit Logs API and Admin UI are admin-only read surfaces', () => {
+  assert.match(auditRoute, /router\.use\(authenticateToken, requireAdmin\)/);
   assert.match(auditRoute, /router\.get\('\/'/);
   assert.doesNotMatch(auditRoute, /router\.(?:post|put|patch|delete)\(/);
   assert.match(serverSource, /app\.use\('\/api\/audit-logs', auditLogsRoutes\)/);

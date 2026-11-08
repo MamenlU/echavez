@@ -42,10 +42,6 @@ async function actionFixture(t, initialOrder, { paid = false } = {}) {
   const query = async (statement, params = []) => {
     const sql = statement.trim().replace(/\s+/g, ' ');
 
-    if (sql.startsWith('SELECT id, username, role, status FROM users WHERE id = ?')) {
-      return [[{ id: params[0], username: 'fixture_admin', role: 'admin', status: 'active' }]];
-    }
-
     if (sql.includes('FROM orders') && sql.includes('FOR UPDATE')) {
       return [[structuredClone(order)]];
     }

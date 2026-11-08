@@ -133,7 +133,7 @@ export function createAiRouter({ database = pool } = {}) {
 
   router.post('/admin/conversations/:id/summary', async (req, res) => {
     try {
-      if (!['admin','super_admin'].includes(req.user.role)) return res.status(403).json({ error: 'Admin access required.' });
+      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
       if (!rateLimit(req.user.id)) return res.status(429).json({ error: 'Please wait a moment before using AI again.' });
       const detail = await messages.getConversation(req.user, req.params.id);
       const context = await buildAdminConversationContext(database, detail);
@@ -150,7 +150,7 @@ export function createAiRouter({ database = pool } = {}) {
 
   router.post('/admin/conversations/:id/suggest-reply', async (req, res) => {
     try {
-      if (!['admin','super_admin'].includes(req.user.role)) return res.status(403).json({ error: 'Admin access required.' });
+      if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required.' });
       if (!rateLimit(req.user.id)) return res.status(429).json({ error: 'Please wait a moment before using AI again.' });
       const detail = await messages.getConversation(req.user, req.params.id);
       const context = await buildAdminConversationContext(database, detail);

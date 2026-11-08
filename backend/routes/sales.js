@@ -1,14 +1,12 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, requireAdmin, requirePosStaff } from '../middleware/auth.js';
-import { recordAuditLog } from '../lib/auditService.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import {
   normalizeDeliveryMunicipality,
   normalizeDeliveryBarangay,
 } from '../lib/deliveryAreas.js';
 import { getSalesFinancialHistory } from '../lib/financialMetrics.js';
 import { requireOpenShiftForAdmin } from '../lib/cashierShiftService.js';
-import { getPosReceipt, matchesPosReceipt } from '../lib/posReceiptService.js';
 
 const router = express.Router();
 
@@ -94,6 +92,24 @@ router.post('/pos', async (req, res) => {
     }
 
     const pos = cleanPosDetails(req.body);
+
+    if (pos.fulfillment === 'delivery') {
+      const [rateRows] = await pool.query(
+        `SELECT id
+         FROM delivery_rates
+         WHERE municipality = ?
+           AND barangay = ?
+           AND is_active = 1
+         LIMIT 1`,
+        [pos.municipality, pos.barangay]
+      );
+
+      if (!rateRows.length) {
+        return res.status(400).json({
+          error: 'Deliver Out is not active for the selected municipality and barangay.'
+        });
+      }
+    }
 
     const [existing] = await pool.query(
       'SELECT sale_id, total_amount, admin_id FROM sales WHERE pos_request_id = ? LIMIT 1',
@@ -222,13 +238,12 @@ router.post('/pos', async (req, res) => {
           total_amount, delivery_fee, customer_name, delivery_contact_person,
           delivery_contact_number, delivery_municipality, delivery_barangay, delivery_address,
           delivery_landmark, payment_status, payment_method, cash_received,
-          change_amount, card_payment_reference, sale_date
-        ) VALUES (NULL, ?, ?, ?, 'Onsite POS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Paid', ?, ?, ?, ?, NOW())`,
+          change_amount, sale_date
+        ) VALUES (NULL, ?, ?, ?, 'Onsite POS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Paid', ?, ?, ?, NOW())`,
         [posRequestId, req.user.id, cashierShift.shift_id, pos.fulfillment, totalAmount, pos.deliveryFee,
           pos.customerName || null, pos.contactPerson || null, pos.contactNumber || null,
           pos.municipality || null, pos.barangay || null, pos.address || null, pos.landmark, storedPayment,
-          normalizedPayment === 'cash' ? normalizedCash : null, changeAmount,
-          normalizedPayment === 'card' ? cardPaymentReference : null]
+          normalizedPayment === 'cash' ? normalizedCash : null, changeAmount]
       );
 
       for (const item of processedItems) {
@@ -278,7 +293,7 @@ router.post('/pos', async (req, res) => {
         paymentMethod: storedPayment,
         cashReceived: normalizedPayment === 'cash' ? normalizedCash : null,
         changeAmount,
-        shiftId: Number(cashierShift.shift_id), receipt,
+        shiftId: Number(cashierShift.shift_id),
       });
     } catch (error) {
       await connection.rollback();
@@ -335,61 +350,6 @@ router.get('/pos/:saleId/receipt', async (req, res) => {
 
 // Cashiers can see only their own POS sales; no global financial reporting access.
 router.get('/my-pos', async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT s.sale_id, s.total_amount, s.sale_date, s.payment_method, s.customer_name,
-              s.fulfillment, s.shift_id, s.payment_status, s.card_payment_reference, s.cash_received, s.change_amount,
-              CONCAT_WS(' ', u.first_name, u.last_name) AS operator_name,
-              u.username AS operator_username, u.role AS operator_role,
-              COALESCE(a.adjustment_count, 0) AS adjustment_count,
-              COALESCE(a.void_count, 0) AS void_count
-       FROM sales s
-       INNER JOIN users u ON u.id = s.admin_id
-       LEFT JOIN (
-         SELECT sale_id, COUNT(*) AS adjustment_count,
-                SUM(CASE WHEN adjustment_type = 'Void' THEN 1 ELSE 0 END) AS void_count
-         FROM sale_adjustments GROUP BY sale_id
-       ) a ON a.sale_id = s.sale_id
-       WHERE s.admin_id = ? AND s.sales_source = 'Onsite POS'
-       ORDER BY s.sale_id DESC LIMIT 100`,
-      [req.user.id]
-    );
-    return res.json({ sales: rows.map(row => ({
-      ...row, reference: `POS-${String(row.sale_id).padStart(6, '0')}`,
-      sales_source: 'Onsite POS', source_label: 'POS',
-      adjustment_state: Number(row.void_count) > 0 ? 'Voided'
-        : Number(row.adjustment_count) > 0 ? 'Adjusted' : 'Completed',
-      total_revenue: Number(row.total_amount),
-    })) });
-  } catch (error) {
-    console.error('Cashier POS history error:', error);
-    return res.status(500).json({ error: 'Unable to load personal POS history.' });
-  }
-});
-
-// Optional display-name lookup. Does NOT expose full customer records.
-router.get('/customer-lookup', async (req, res) => {
-  const q = String(req.query.q || '').trim().slice(0, 60);
-  if (q.length < 2) return res.json({ customers: [] });
-  try {
-    const escaped = q.replace(/[\\%_]/g, '\\$&');
-    const [rows] = await pool.query(
-      `SELECT id, first_name, last_name FROM users
-       WHERE role = 'customer' AND status = 'active'
-         AND (first_name LIKE ? OR last_name LIKE ? OR username LIKE ?)
-       ORDER BY first_name, last_name LIMIT 15`,
-      [`%${escaped}%`, `%${escaped}%`, `%${escaped}%`]
-    );
-    return res.json({ customers: rows.map(u => ({
-      id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ').trim()
-    })) });
-  } catch (error) {
-    console.error('POS customer lookup error:', error);
-    return res.status(500).json({ error: 'Customer lookup unavailable.' });
-  }
-});
-
-router.get('/history', requireAdmin, async (_req, res) => {
   try {
     res.json(await getSalesFinancialHistory(pool));
   } catch (error) {

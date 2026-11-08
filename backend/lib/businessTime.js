@@ -42,7 +42,7 @@ function formatServerLocalDateTime(utcDate, serverOffsetMinutes) {
 
 export async function getServerOffsetMinutes(database) {
   const [[row]] = await database.query(
-    `SELECT TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), NOW()) AS server_offset_minutes`
+    `SELECT 0 AS server_offset_minutes`
   );
 
   const offset = Number(row?.server_offset_minutes);

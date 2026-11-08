@@ -1,8 +1,7 @@
 import express from 'express';
 import pool from '../db.js';
-import { authenticateToken, requirePosStaff, requireAdmin, requireActionApproval } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { recordAuditLog } from '../lib/auditService.js';
-import { enrichShiftApprovals } from '../lib/staffActivity.js';
 import {
   calculateCashReconciliation,
   getOpenShiftForAdmin,
@@ -12,15 +11,14 @@ import {
 } from '../lib/cashierShiftService.js';
 
 const router = express.Router();
-router.use(authenticateToken, requirePosStaff);
+router.use(authenticateToken, requireAdmin);
 
 router.get('/current', async (req, res) => {
   try {
     const open = await getOpenShiftForAdmin(pool, req.user.id);
     if (!open) return res.json({ has_open_shift: false, shift: null });
     const shift = await getShiftMetrics(pool, open.shift_id);
-    const [identified] = await enrichShiftApprovals(pool, [shift]);
-    res.json({ has_open_shift: true, shift: identified });
+    res.json({ has_open_shift: true, shift });
   } catch (error) {
     console.error('Current cashier shift error:', error);
     res.status(500).json({ error: 'Unable to load the current Cashier Shift.' });
@@ -38,8 +36,7 @@ router.get('/history', async (req, res) => {
         cs.cash_sales_amount, cs.card_sales_amount, cs.cash_refunds_amount,
         cs.expected_cash, cs.actual_cash, cs.discrepancy, cs.notes,
         CONCAT_WS(' ', u.first_name, u.last_name) AS admin_name,
-        u.username AS admin_username,
-        u.role AS admin_role
+        u.username AS admin_username
        FROM cashier_shifts cs
        INNER JOIN users u ON u.id = cs.admin_id
        WHERE cs.admin_id = ?
@@ -47,98 +44,10 @@ router.get('/history', async (req, res) => {
        LIMIT ?`,
       [req.user.id, limit]
     );
-    const shifts = await enrichShiftApprovals(pool, rows.map(row => ({
-      ...row,
-      shift_owner_id: Number(row.admin_id),
-      shift_owner_name: row.admin_name || row.admin_username || `Staff #${row.admin_id}`,
-      shift_owner_role: row.admin_role,
-    })));
-    res.json({ shifts, count: shifts.length, limit });
+    res.json({ shifts: rows, count: rows.length, limit });
   } catch (error) {
     console.error('Cashier shift history error:', error);
     res.status(500).json({ error: 'Unable to load Cashier Shift history.' });
-  }
-});
-
-// Read-only monitoring for Admin and Super Admin. A Cashier cannot use this API.
-// The operator's own current/history/close endpoints remain strictly owner-scoped.
-router.get('/staff', requireAdmin, async (req, res) => {
-  try {
-    const requestedLimit = Number(req.query.limit || 50);
-    const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
-    const [rows] = await pool.query(
-      `SELECT cs.*, u.username AS admin_username,
-              CONCAT_WS(' ', u.first_name, u.last_name) AS admin_name,
-              u.role AS admin_role,
-              COALESCE(s.pos_transaction_count, 0) AS live_pos_count,
-              COALESCE(s.cash_sales_amount, 0) AS live_cash_sales,
-              COALESCE(s.card_sales_amount, 0) AS live_card_sales,
-              COALESCE(r.cash_refunds_amount, 0) AS live_cash_refunds,
-              COALESCE(e.cash_expenses_amount, 0) AS live_cash_expenses
-       FROM cashier_shifts cs
-       INNER JOIN users u ON u.id = cs.admin_id
-       LEFT JOIN (
-         SELECT shift_id, COUNT(*) AS pos_transaction_count,
-           SUM(CASE WHEN LOWER(COALESCE(payment_method, '')) = 'cash' THEN total_amount ELSE 0 END) AS cash_sales_amount,
-           SUM(CASE WHEN LOWER(COALESCE(payment_method, '')) = 'card' THEN total_amount ELSE 0 END) AS card_sales_amount
-         FROM sales WHERE shift_id IS NOT NULL
-           AND sales_source IN ('Onsite POS', 'Online Order') GROUP BY shift_id
-       ) s ON s.shift_id = cs.shift_id
-       LEFT JOIN (
-         SELECT shift_id, SUM(CASE WHEN refund_method = 'Cash' THEN total_refund_amount ELSE 0 END) AS cash_refunds_amount
-         FROM sale_adjustments WHERE shift_id IS NOT NULL GROUP BY shift_id
-       ) r ON r.shift_id = cs.shift_id
-       LEFT JOIN (
-         SELECT shift_id, SUM(amount) AS cash_expenses_amount FROM expenses
-         WHERE shift_id IS NOT NULL AND status = 'Recorded' AND payment_method = 'Cash Drawer'
-         GROUP BY shift_id
-       ) e ON e.shift_id = cs.shift_id
-       ORDER BY cs.opened_at DESC, cs.shift_id DESC LIMIT ?`,
-      [limit]
-    );
-    const shifts = rows.map(row => {
-      const closed = row.status === 'Closed';
-      const opening = Number(row.opening_cash || 0);
-      const cashSales = Number(closed ? row.cash_sales_amount : row.live_cash_sales) || 0;
-      const cardSales = Number(closed ? row.card_sales_amount : row.live_card_sales) || 0;
-      const cashRefunds = Number(closed ? row.cash_refunds_amount : row.live_cash_refunds) || 0;
-      const cashExpenses = Number(closed ? row.cash_expenses_amount : row.live_cash_expenses) || 0;
-      return {
-        shift_id: Number(row.shift_id), admin_id: Number(row.admin_id),
-        shift_owner_id: Number(row.admin_id),
-        shift_owner_name: row.admin_name || row.admin_username || `Staff #${row.admin_id}`,
-        shift_owner_role: row.admin_role,
-        shift_owner_username: row.admin_username,
-        status: row.status, opened_at: row.opened_at, closed_at: row.closed_at,
-        opening_cash: opening,
-        pos_transaction_count: Number(closed ? row.pos_transaction_count : row.live_pos_count) || 0,
-        cash_sales_amount: cashSales, card_sales_amount: cardSales,
-        cash_refunds_amount: cashRefunds, cash_expenses_amount: cashExpenses,
-        expected_cash: closed && row.expected_cash != null ? Number(row.expected_cash)
-          : Number((opening + cashSales - cashRefunds - cashExpenses).toFixed(2)),
-        actual_cash: row.actual_cash == null ? null : Number(row.actual_cash),
-        discrepancy: row.discrepancy == null ? null : Number(row.discrepancy),
-      };
-    });
-    const identified = await enrichShiftApprovals(pool, shifts);
-    res.json({ shifts: identified, count: identified.length, limit });
-  } catch (error) {
-    console.error('Staff Cashier Shift monitoring error:', error);
-    res.status(500).json({ error: 'Unable to load staff Cashier Shift monitoring.' });
-  }
-});
-
-router.get('/staff/:shiftId', requireAdmin, async (req, res) => {
-  try {
-    const id = Number(req.params.shiftId);
-    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid Shift ID.' });
-    const shift = await getShiftMetrics(pool, id);
-    if (!shift) return res.status(404).json({ error: 'Cashier Shift not found.' });
-    const [identified] = await enrichShiftApprovals(pool, [shift]);
-    return res.json({ shift: identified });
-  } catch (error) {
-    console.error('Staff Cashier Shift detail error:', error);
-    res.status(500).json({ error: 'Unable to load staff Cashier Shift detail.' });
   }
 });
 
@@ -152,15 +61,14 @@ router.get('/:shiftId', async (req, res) => {
     if (!shift || shift.admin_id !== Number(req.user.id)) {
       return res.status(404).json({ error: 'Cashier Shift not found.' });
     }
-    const [identified] = await enrichShiftApprovals(pool, [shift]);
-    res.json({ shift: identified });
+    res.json({ shift });
   } catch (error) {
     console.error('Cashier shift detail error:', error);
     res.status(500).json({ error: 'Unable to load Cashier Shift details.' });
   }
 });
 
-router.post('/open', requireActionApproval('shift_open'), async (req, res) => {
+router.post('/open', async (req, res) => {
   let connection;
   try {
     const openingCash = normalizeCashAmount(req.body.openingCash, 'Opening cash');
@@ -169,8 +77,6 @@ router.post('/open', requireActionApproval('shift_open'), async (req, res) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    // Lock the owner row to serialize concurrent opens across requests/instances.
-    await connection.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
     const existing = await getOpenShiftForAdmin(connection, req.user.id, { lock: true });
     if (existing) {
       throw Object.assign(new Error('You already have an open Cashier Shift.'), {
@@ -187,7 +93,7 @@ router.post('/open', requireActionApproval('shift_open'), async (req, res) => {
     );
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'cash_shift.open',
       entityType: 'cashier_shift',
       entityId: result.insertId,
@@ -195,8 +101,7 @@ router.post('/open', requireActionApproval('shift_open'), async (req, res) => {
       after: {
         shift_id: Number(result.insertId),
         opening_cash: openingCash,
-        status: 'Open', operator_user_id: req.user.id, operator_role: req.user.role,
-        approval: req.managerApproval || { status: 'not_required' },
+        status: 'Open',
       },
       reason: notes || 'POS cash-drawer opening balance recorded.',
     });
@@ -215,7 +120,7 @@ router.post('/open', requireActionApproval('shift_open'), async (req, res) => {
   }
 });
 
-router.post('/:shiftId/close', requireActionApproval('shift_close'), async (req, res) => {
+router.post('/:shiftId/close', async (req, res) => {
   let connection;
   try {
     const shiftId = Number(req.params.shiftId);
@@ -254,10 +159,6 @@ router.post('/:shiftId/close', requireActionApproval('shift_close'), async (req,
       actualCash,
     });
 
-    if (reconciliation.discrepancy !== 0 && !closingNotes) {
-      throw Object.assign(new Error('Explain the cash shortage or overage before closing the shift.'), { statusCode: 400 });
-    }
-
     const notes = closingNotes || lockedShift.notes || null;
     await connection.query(
       `UPDATE cashier_shifts SET
@@ -288,7 +189,7 @@ router.post('/:shiftId/close', requireActionApproval('shift_close'), async (req,
     );
 
     await recordAuditLog(connection, {
-      adminId: req.user.id, actorRole: req.user.role,
+      adminId: req.user.id,
       action: 'cash_shift.close',
       entityType: 'cashier_shift',
       entityId: shiftId,
@@ -312,9 +213,6 @@ router.post('/:shiftId/close', requireActionApproval('shift_close'), async (req,
         expected_cash: reconciliation.expected_cash,
         actual_cash: actualCash,
         discrepancy: reconciliation.discrepancy,
-        operator_role: req.user.role, approval: req.managerApproval || { status: 'not_required' },
-        approved_by_manager_id: req.managerApproval?.id || null,
-        operator_user_id: req.user.id,
       },
       reason: closingNotes || 'End-of-shift cash reconciliation.',
     });

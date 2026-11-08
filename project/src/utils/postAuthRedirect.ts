@@ -18,7 +18,9 @@ export function rememberCustomerMessagesRedirect() {
 
 export function consumePostAuthRedirect(role: string | undefined) {
   const fallback =
-    (role === 'admin' || role === 'super_admin') ? '/admin/dashboard' : role === 'cashier' ? '/cashier/dashboard' : '/customer/dashboard';
+    role === 'admin'
+      ? '/admin/dashboard'
+      : '/customer/dashboard';
 
   const raw = sessionStorage.getItem(STORAGE_KEY);
   sessionStorage.removeItem(STORAGE_KEY);

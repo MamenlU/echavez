@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Eye, RefreshCw, Search, ShieldCheck, X } from 'lucide-react';
-import { approvalDescription, staffIdentity, staffRoleLabel } from '../utils/staffIdentity';
 
 type AuditData = Record<string, unknown> | null;
 
@@ -10,12 +8,6 @@ interface AuditLogEntry {
   admin_id: number;
   admin_username: string;
   admin_name: string | null;
-  admin_role?: string | null;
-  actor_name?: string | null;
-  actor_role?: string | null;
-  actor_role_source?: 'at_action' | 'current_account';
-  approval_status?: string;
-  approved_by?: { id: number; name: string; username: string; role: string } | null;
   action: string;
   entity_type: string;
   entity_id: string | null;
@@ -49,16 +41,6 @@ const actionLabels: Record<string, string> = {
   'supplier.create': 'Supplier Created',
   'supplier.update': 'Supplier Updated',
   'supplier.lead_time_update': 'Supplier Lead Time Changed',
-  'staff.admin.create': 'Admin Account Created',
-  'staff.admin.status': 'Admin Account Status Changed',
-  'staff.cashier.create': 'Cashier Account Created',
-  'staff.cashier.status': 'Cashier Account Status Changed',
-  'staff.super_admin.bootstrap': 'Initial Super Admin Assigned',
-  'approval.rejected': 'Approval Verification Failed',
-  'pickup.arrival': 'Pickup Customer Arrival Verified',
-  'pickup.handover': 'Pickup Order Handed Over',
-  'order.status': 'Online Order Status Changed',
-  'sale.pos.complete': 'POS Sale Completed',
   'cash_shift.open': 'Cashier Shift Opened',
   'cash_shift.close': 'Cashier Shift Closed',
   'expense.create': 'Expense Recorded',
@@ -74,8 +56,6 @@ const entityLabels: Record<string, string> = {
   purchase_order: 'Purchase Order',
   cashier_shift: 'Cashier Shift',
   expense: 'Expense',
-  user: 'Staff Account',
-  authorization: 'Authorization Attempt',
   supplier: 'Supplier',
 };
 
@@ -92,45 +72,9 @@ const formatDateTime = (value: string) => {
 };
 
 const formatAuditData = (data: AuditData) => {
-  if (!data || Object.keys(data).length === 0) return 'No values recorded for this event.';
+  if (!data || Object.keys(data).length === 0) return 'No recorded values.';
   return JSON.stringify(data, null, 2);
 };
-
-const auditFieldLabel = (key: string) => key.replace(/_/g, ' ')
-  .replace(/\b\w/g, letter => letter.toUpperCase())
-  .replace(/\bId\b/g, 'ID').replace(/\bPos\b/g, 'POS');
-
-const auditValueText = (key: string, value: unknown): string => {
-  if (value == null) return 'Not recorded';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'number' && /(amount|cash|fee|price|cost|refund|total|discrepancy)/i.test(key)) {
-    return `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
-  return String(value);
-};
-
-function AuditReadableData({ data, emptyText }: { data: AuditData; emptyText: string }) {
-  if (!data || Object.keys(data).length === 0) {
-    return <div className="rounded-xl bg-[#F7F9F8] p-4 text-xs text-steel-600">{emptyText}</div>;
-  }
-  // Recursively flatten *only* the already-redacted audit snapshot; do not alter data.
-  const entries: { label: string; key: string; value: unknown }[] = [];
-  const walk = (current: Record<string, unknown>, prefix = '', depth = 0) => {
-    for (const [key, value] of Object.entries(current)) {
-      const label = `${prefix}${auditFieldLabel(key)}`;
-      if (value && typeof value === 'object' && !Array.isArray(value) && depth < 4) {
-        walk(value as Record<string, unknown>, `${label} · `, depth + 1);
-      } else entries.push({ label, key, value: typeof value === 'object' && value !== null ? JSON.stringify(value) : value });
-    }
-  };
-  walk(data);
-  return <dl className="divide-y divide-[#E4ECE7] overflow-hidden rounded-xl border border-[#E4ECE7] bg-[#F7F9F8]">
-    {entries.map(({label, key, value}, index) => <div key={`${label}-${index}`} className="grid grid-cols-1 gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,0.95fr)_minmax(0,1.3fr)] sm:gap-3">
-      <dt className="break-words text-[11px] font-semibold text-[#52645D]">{label}</dt>
-      <dd className="break-words text-xs font-medium text-[#17372D]">{auditValueText(key, value)}</dd>
-    </div>)}
-  </dl>;
-}
 
 export function AdminAuditLogPanel() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
@@ -142,66 +86,11 @@ export function AdminAuditLogPanel() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
-  const [showTechnicalJson, setShowTechnicalJson] = useState(false);
-  const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const detailDialogRef = useRef<HTMLDivElement | null>(null);
-  const detailCloseRef = useRef<HTMLButtonElement | null>(null);
-
-  // Keep the details dialog attached to the viewport, not the animated dashboard panel.
-  // Restore scrolling and keyboard focus when the dialog closes.
-  useEffect(() => {
-    if (!selectedLog) return;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    detailCloseRef.current?.focus();
-
-    const handleDialogKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setSelectedLog(null);
-        return;
-      }
-      if (event.key !== 'Tab' || !detailDialogRef.current) return;
-
-      const dialog = detailDialogRef.current;
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter((element) => element.getClientRects().length > 0);
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleDialogKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleDialogKeyDown);
-      document.body.style.overflow = previousOverflow;
-      if (detailTriggerRef.current?.isConnected) detailTriggerRef.current.focus();
-    };
-  }, [selectedLog]);
-
-  const showDetails = (log: AuditLogEntry, trigger: HTMLButtonElement) => {
-    detailTriggerRef.current = trigger;
-    setShowTechnicalJson(false);
-    setSelectedLog(log);
-  };
 
   const loadLogs = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
-      setError('Your staff session has expired. Please log in again.');
+      setError('Your Admin session has expired. Please log in again.');
       setLoading(false);
       return;
     }
@@ -221,7 +110,7 @@ export function AdminAuditLogPanel() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.assign('/login');
@@ -265,7 +154,7 @@ export function AdminAuditLogPanel() {
           </p>
           <h2 className="mt-1 text-2xl font-bold font-display text-steel-950">Audit Logs</h2>
           <p className="mt-1 max-w-3xl text-sm text-steel-500">
-            Review meaningful Cashier, Admin and Super Admin actions including POS, fulfillment, approvals, purchasing, expenses and adjustments. Routine page views and harmless interactions are intentionally not logged.
+            Review meaningful Admin changes to products, inventory, purchasing, expenses, and sensitive sales adjustments. Routine page views and harmless interactions are intentionally not logged.
           </p>
         </div>
         <button
@@ -287,7 +176,7 @@ export function AdminAuditLogPanel() {
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search staff, role, action, record, or summary..."
+              placeholder="Search action, record, summary, or Admin..."
               className="w-full rounded-xl border border-steel-200 bg-white py-2.5 pl-9 pr-3 text-xs text-steel-900 outline-none focus:border-[#2F7D5A] focus:ring-2 focus:ring-[#2F7D5A]/15"
             />
           </label>
@@ -369,7 +258,7 @@ export function AdminAuditLogPanel() {
           <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center">
             <ShieldCheck className="h-8 w-8 text-steel-300" />
             <p className="mt-3 text-sm font-semibold text-steel-700">No matching audit records yet.</p>
-            <p className="mt-1 text-xs text-steel-500">Meaningful staff activity will appear here as it is recorded.</p>
+            <p className="mt-1 text-xs text-steel-500">New sensitive Admin actions will appear here after Phase 3 is active.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -377,7 +266,7 @@ export function AdminAuditLogPanel() {
               <thead className="bg-[#F4F8F5] text-[10px] uppercase tracking-wider text-[#60756B]">
                 <tr>
                   <th className="px-4 py-3">Date &amp; Time</th>
-                  <th className="px-4 py-3">Performed By</th>
+                  <th className="px-4 py-3">Admin</th>
                   <th className="px-4 py-3">Action</th>
                   <th className="px-4 py-3">Record</th>
                   <th className="px-4 py-3">Summary</th>
@@ -389,8 +278,7 @@ export function AdminAuditLogPanel() {
                   <tr key={log.audit_id} className="align-top hover:bg-[#FAFCFA]">
                     <td className="whitespace-nowrap px-4 py-3 text-steel-600">{formatDateTime(log.created_at)}</td>
                     <td className="px-4 py-3">
-                      <p className="font-semibold text-steel-900">{log.actor_name || log.admin_name?.trim() || log.admin_username || `Staff #${log.admin_id}`}</p>
-                      <p className="text-[10px] text-steel-500">{staffRoleLabel(log.actor_role || log.admin_role)}{log.actor_role_source === 'current_account' ? ' (current role)' : ''}</p>
+                      <p className="font-semibold text-steel-900">{log.admin_name?.trim() || log.admin_username}</p>
                       <p className="text-[10px] text-steel-400">@{log.admin_username}</p>
                     </td>
                     <td className="px-4 py-3">
@@ -409,10 +297,8 @@ export function AdminAuditLogPanel() {
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
-                        onClick={(event) => showDetails(log, event.currentTarget)}
-                        aria-haspopup="dialog"
-                        aria-label={`View details for audit #${log.audit_id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-steel-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-[#2F7D5A] hover:bg-[#EEF8F2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F7D5A]"
+                        onClick={() => setSelectedLog(log)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-steel-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-[#2F7D5A] hover:bg-[#EEF8F2]"
                       >
                         <Eye className="h-3.5 w-3.5" /> View
                       </button>
@@ -425,43 +311,30 @@ export function AdminAuditLogPanel() {
         )}
       </div>
 
-      {selectedLog && createPortal(
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 p-3 sm:p-6"
-          onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedLog(null); }}
-        >
-          <div
-            ref={detailDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="audit-details-title"
-            aria-describedby="audit-details-date"
-            tabIndex={-1}
-            className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
-          >
-            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-steel-100 bg-white px-4 py-4 sm:px-5">
-              <div className="min-w-0">
+      {selectedLog && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="sticky top-0 flex items-start justify-between border-b border-steel-100 bg-white px-5 py-4">
+              <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-[#2F7D5A]">Audit #{selectedLog.audit_id}</p>
-                <h3 id="audit-details-title" className="mt-1 break-words text-base font-bold text-steel-950 sm:text-lg">{selectedLog.summary}</h3>
-                <p id="audit-details-date" className="mt-1 text-xs text-steel-500">{formatDateTime(selectedLog.created_at)}</p>
+                <h3 className="mt-1 text-lg font-bold text-steel-950">{selectedLog.summary}</h3>
+                <p className="mt-1 text-xs text-steel-500">{formatDateTime(selectedLog.created_at)}</p>
               </div>
               <button
                 type="button"
-                ref={detailCloseRef}
                 onClick={() => setSelectedLog(null)}
-                className="shrink-0 rounded-lg p-2 text-steel-500 hover:bg-steel-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F7D5A]"
+                className="rounded-lg p-2 text-steel-500 hover:bg-steel-100"
                 aria-label="Close audit details"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 sm:p-5">
+            <div className="space-y-4 p-5">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl bg-steel-50 p-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Performed By</p>
-                  <p className="mt-1 text-xs font-semibold text-steel-800">{staffIdentity(selectedLog.actor_name || selectedLog.admin_name || selectedLog.admin_username, selectedLog.actor_role || selectedLog.admin_role, selectedLog.admin_id)}</p>
-                  {selectedLog.actor_role_source === 'current_account' && <p className="mt-1 text-[10px] text-amber-700">Current role; historical role not recorded</p>}
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Admin</p>
+                  <p className="mt-1 text-xs font-semibold text-steel-800">{selectedLog.admin_name?.trim() || selectedLog.admin_username}</p>
                 </div>
                 <div className="rounded-xl bg-steel-50 p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Action</p>
@@ -470,17 +343,6 @@ export function AdminAuditLogPanel() {
                 <div className="rounded-xl bg-steel-50 p-3">
                   <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Record</p>
                   <p className="mt-1 text-xs font-semibold text-steel-800">{entityLabels[selectedLog.entity_type] || selectedLog.entity_type}{selectedLog.entity_id ? ` #${selectedLog.entity_id}` : ''}</p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Authorization Result</p>
-                  <p className="mt-1 text-xs font-semibold text-steel-800">{selectedLog.approval_status === 'verification_failed' ? 'Approval verification failed' : selectedLog.approval_status === 'self_reauthenticated' ? 'Super Admin reauthenticated' : selectedLog.approval_status === 'approved' ? 'Approved' : selectedLog.approval_status === 'not_required' ? 'Not required' : 'No separate approval recorded'}</p>
-                </div>
-                <div className="rounded-xl border border-[#DDE6E0] bg-[#F7FAF8] p-3">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-steel-400">Authorized By</p>
-                  <p className="mt-1 text-xs font-semibold text-steel-800">{selectedLog.approval_status === 'self_reauthenticated' ? 'Same Super Admin (fresh verification)' : selectedLog.approved_by ? staffIdentity(selectedLog.approved_by.name || selectedLog.approved_by.username, selectedLog.approved_by.role, selectedLog.approved_by.id) : approvalDescription(selectedLog.after_data?.approval as {status?: string} | null)}</p>
                 </div>
               </div>
 
@@ -493,27 +355,17 @@ export function AdminAuditLogPanel() {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <div>
-                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-steel-500">Before — Previous Recorded Values</h4>
-                  <AuditReadableData data={selectedLog.before_data} emptyText="No previous values recorded for this event." />
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-steel-500">Before</h4>
+                  <pre className="min-h-36 overflow-x-auto whitespace-pre-wrap rounded-xl bg-[#F7F9F8] p-4 text-[11px] leading-5 text-steel-700">{formatAuditData(selectedLog.before_data)}</pre>
                 </div>
                 <div>
-                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-steel-500">After — Recorded Result</h4>
-                  <AuditReadableData data={selectedLog.after_data} emptyText="No resulting values recorded for this event." />
+                  <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-steel-500">After</h4>
+                  <pre className="min-h-36 overflow-x-auto whitespace-pre-wrap rounded-xl bg-[#F7F9F8] p-4 text-[11px] leading-5 text-steel-700">{formatAuditData(selectedLog.after_data)}</pre>
                 </div>
-              </div>
-              <div className="border-t border-steel-100 pt-3">
-                <button type="button" aria-expanded={showTechnicalJson} onClick={() => setShowTechnicalJson(open => !open)} className="rounded-lg border border-steel-200 bg-white px-3 py-2 text-xs font-bold text-[#2F7D5A] hover:bg-[#EEF8F2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2F7D5A]">
-                  {showTechnicalJson ? 'Hide Technical Details (JSON)' : 'View Technical Details (JSON)'}
-                </button>
-                {showTechnicalJson && <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <div><h5 className="mb-1 text-xs font-bold">Before — JSON</h5><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-[#F7F9F8] p-3 text-[11px]">{formatAuditData(selectedLog.before_data)}</pre></div>
-                  <div><h5 className="mb-1 text-xs font-bold">After — JSON</h5><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-[#F7F9F8] p-3 text-[11px]">{formatAuditData(selectedLog.after_data)}</pre></div>
-                </div>}
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>
       )}
     </div>
   );

@@ -71,7 +71,7 @@ async function fixture(t) {
     const { service, calls } = createServiceFixture();
     const app = express();
     app.use(express.json());
-    app.use('/api/messages', createMessagesRouter({ service, database: { query: async (_sql, [id]) => [[{ id, username: `user${id}`, role: Number(id) === 1 ? 'admin' : 'customer', status: 'active' }]] } }));
+    app.use('/api/messages', createMessagesRouter({ service }));
 
     const server = await new Promise(resolve => {
         const instance = app.listen(0, '127.0.0.1', () => resolve(instance));

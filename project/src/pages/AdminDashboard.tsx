@@ -4,6 +4,7 @@ import React, {
   useRef
 } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { AdminMessages } from '../components/AdminMessages';
 import { AdminDashboardOverview } from '../components/AdminDashboardOverview';
 import { AdminSidebar, type AdminSidebarTab } from '../components/AdminSidebar';
@@ -13,13 +14,6 @@ import { SalesAdjustmentPanel } from '../components/SalesAdjustmentPanel';
 import { PurchaseOrdersPanel, type PurchaseOrderReceiveTarget } from '../components/PurchaseOrdersPanel';
 import { ReorderSuggestionsPanel } from '../components/ReorderSuggestionsPanel';
 import { CashierShiftPanel, CashierShiftStatusBanner } from '../components/CashierShiftPanel';
-import { AdminStaffShiftMonitoring } from '../components/AdminStaffShiftMonitoring';
-import { staffIdentity } from '../utils/staffIdentity';
-import { PosReceiptActions } from '../components/PosReceiptActions';
-import { PosDeliveryFeeField } from '../components/PosDeliveryFeeField';
-import { ViewportDetailsDialog } from '../components/ViewportDetailsDialog';
-import { getPosDeliverySuggestion } from '../utils/posDeliveryPricing';
-import { reprintPosReceipt, type PosReceipt } from '../utils/posReceipt';
 import { ExpenseManagementPanel } from '../components/ExpenseManagementPanel';
 
 import { 
@@ -271,9 +265,6 @@ interface SalesHistoryItem {
   reference: string;
   source_label: 'Pickup' | 'Shop & Go' | 'Delivery' | 'POS';
   payment_method: string;
-  card_payment_reference?: string | null;
-  cash_received?: number | null;
-  change_amount?: number | null;
   adjustment_count: number;
   void_count: number;
   adjustment_state: 'Completed' | 'Adjusted' | 'Voided';
@@ -576,6 +567,26 @@ const [movementTableView, setMovementTableView] = useState<'compact' | 'full'>('
 const [reportTableView, setReportTableView] = useState<'compact' | 'full'>('compact');
 const [selectedSaleHistory, setSelectedSaleHistory] = useState<SalesHistoryItem | null>(null);
 const [selectedMovementHistory, setSelectedMovementHistory] = useState<InventoryMovement | null>(null);
+
+useEffect(() => {
+  if (!selectedSaleHistory && !selectedMovementHistory) return undefined;
+
+  const previousOverflow = document.body.style.overflow;
+  const closeOnEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      setSelectedSaleHistory(null);
+      setSelectedMovementHistory(null);
+    }
+  };
+
+  document.body.style.overflow = 'hidden';
+  window.addEventListener('keydown', closeOnEscape);
+
+  return () => {
+    document.body.style.overflow = previousOverflow;
+    window.removeEventListener('keydown', closeOnEscape);
+  };
+}, [selectedSaleHistory, selectedMovementHistory]);
 
 useEffect(() => {
   localStorage.setItem('rayjin_admin_sidebar_collapsed', isSidebarCollapsed ? '1' : '0');
@@ -1304,7 +1315,7 @@ const fetchManagementOverviewReport = async () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (res.status === 401) {
+    if (res.status === 401 || res.status === 403) {
       handleAdminSessionExpired();
       return;
     }
@@ -2241,7 +2252,7 @@ const fetchDeliveryAreas = async () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (res.status === 401) {
+    if (res.status === 401 || res.status === 403) {
       handleAdminSessionExpired();
       return;
     }
@@ -2934,7 +2945,8 @@ const handleSaveAdminMessage = async (
       .catch(() => ({}));
 
     if (
-      response.status === 401
+      response.status === 401 ||
+      response.status === 403
     ) {
       handleAdminSessionExpired();
       return false;
@@ -3087,7 +3099,7 @@ const handleAddDeliveryRate = async () => {
 
     const data = await res.json().catch(() => ({}));
 
-    if (res.status === 401) {
+    if (res.status === 401 || res.status === 403) {
       handleAdminSessionExpired();
       return;
     }
@@ -4498,19 +4510,14 @@ const handleCheckoutPOS = async (
       quantity: item.quantity,
     }));
 
-  const cartSignature = JSON.stringify({
-    cart: cartSnapshot.map(item => ({ productId: item.product.id, quantity: item.quantity })).sort((a,b) => a.productId-b.productId),
-    fulfillment: posFulfillment, deliveryFee, paymentMethod: posPaymentMethod,
-    cashReceived: posPaymentMethod === 'cash' ? normalizedCashReceived : null,
-    cardPaymentConfirmed: posPaymentMethod === 'card' && posCardPaymentConfirmed,
-    cardPaymentReference: posPaymentMethod === 'card' ? posCardPaymentReference.trim() : null,
-    customerName: posDeliveryDetails.customer_name.trim(),
-    contactPerson: posDeliveryDetails.contact_person.trim(),
-    contactNumber: posDeliveryDetails.contact_number.trim(),
-    municipality: posDeliveryDetails.municipality,
-    barangay: posDeliveryDetails.barangay,
-    address: posDeliveryDetails.address.trim(), landmark: posDeliveryDetails.landmark.trim(),
-  });
+  const cartSignature =
+    cartSnapshot
+      .map(
+        (item) =>
+          `${item.product.id}:${item.quantity}`
+      )
+      .sort()
+      .join('|') + `|${posFulfillment}|${deliveryFee}|${posDeliveryDetails.contact_number}|${posDeliveryDetails.municipality}|${posDeliveryDetails.barangay}`;
 
   const pendingRequestKey =
     'rayjin_pos_pending_request';
@@ -5488,6 +5495,9 @@ const posSelectedRate = deliveryRateSettings.find(
 const posAvailableBarangays = deliveryRateSettings.filter(
   (rate) => rate.municipality === posDeliveryDetails.municipality && rate.is_active
 );
+const posAvailableBarangays = deliveryRateSettings.filter(
+  (rate) => rate.municipality === posDeliveryDetails.municipality && rate.is_active
+);
 const posDeliverySuggestion = getPosDeliverySuggestion(posCart, posFulfillment === 'delivery' ? posSelectedRate : null);
 const posFinalDeliveryFee = posFulfillment === 'delivery'
   ? Number(posDeliveryDetails.delivery_fee || 0)
@@ -5926,9 +5936,6 @@ const filteredSalesHistory = salesHistory.filter(
       sale.payment_method,
       sale.payment_status,
       sale.adjustment_state,
-      sale.operator_name,
-      sale.operator_username,
-      sale.operator_role,
     ]
       .filter(Boolean)
       .join(' ')
@@ -11998,10 +12005,7 @@ setNewProduct({
 
 {/* CASHIER SHIFT & CASH RECONCILIATION */}
 {activeTab === 'cashierShift' && (
-  <div className="space-y-6">
-    <CashierShiftPanel onGoToPos={() => setActiveTab('pos')} />
-    <AdminStaffShiftMonitoring />
-  </div>
+  <CashierShiftPanel onGoToPos={() => setActiveTab('pos')} />
 )}
 
 {/* EXPENSE MANAGEMENT & ESTIMATED NET PROFIT */}
@@ -12018,11 +12022,11 @@ setNewProduct({
               <p className="mt-1 text-xs text-[#71817A]">Scan a barcode or browse products manually, then complete the existing cash-counter workflow.</p>
             </div>
             <CashierShiftStatusBanner onManageShift={() => setActiveTab('cashierShift')} />
-            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
+            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12 lg:items-stretch">
   {/* Product picker */}
   <div
   ref={posProductPanelRef}
-  className="lg:col-span-7 flex min-w-0 flex-col gap-4 self-start rounded-2xl border border-[#DDE6E0] bg-white p-4 shadow-sm sm:p-5"
+  className="lg:col-span-7 flex min-h-[580px] min-w-0 flex-col gap-4 rounded-2xl border border-[#DDE6E0] bg-white p-5 shadow-sm"
 >
               {/* Barcode Scanner */}
 <div className="bg-[#F5F7F5] border border-[#DDE6E0] rounded-xl p-4">
@@ -12122,16 +12126,16 @@ setNewProduct({
                       disabled={p.stock <= 0}
                       className="flex min-w-0 items-center gap-3 rounded-xl border border-[#E5ECE8] bg-white p-3 text-left transition-colors hover:border-emerald-200 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 group"
                     >
-                      {renderProductImage(p.image, p.category, "h-10 w-10 shrink-0 rounded-lg object-contain", "text-2xl")}
-                      <div className="min-w-0 flex-1">
-                        <h5 className="text-xs font-bold text-steel-800 line-clamp-2">{p.name}</h5>
-                        <p className="mt-0.5 text-[10px] text-steel-500">{p.barcode || 'No barcode'} · Stock {p.stock} · ₱{Number(p.price).toFixed(2)}</p>
+                      {renderProductImage(p.image, p.category, "w-8 h-8 object-contain rounded-lg group-hover:scale-110 transition-transform", "text-3xl")}
+                      <div>
+                        <h5 className="text-xs font-bold text-steel-800 line-clamp-1">{p.name}</h5>
+                        <p className="text-[10px] font-bold text-construction-600 mt-0.5">₱{Number(p.price).toFixed(2)}</p>
                         {p.fulfillment_rule === 'delivery_only' && (
                           <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-amber-800">
                             Delivery Only
                           </span>
                         )}
-                        <span className="sr-only">Product available: {p.stock} units</span>
+                        <span className="text-[9px] text-steel-500 mt-1 block">In Stock: {p.stock}</span>
                       </div>
                       <span aria-hidden="true" className="shrink-0 rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-bold text-white">Add</span>
                     </button>
@@ -12778,7 +12782,6 @@ onChange={(e) =>
               <td className="px-4 py-3 align-top">
                 <p className="whitespace-nowrap font-semibold text-steel-600">{new Date(sale.sale_date).toLocaleString()}</p>
                 <p className="mt-1 whitespace-nowrap font-extrabold text-[#17372D]">{sale.reference}</p>
-                <p className="mt-1 text-[10px] font-medium text-slate-500">{sale.order_id ? 'Completed by' : 'Operator'}: {staffIdentity(sale.operator_name || sale.operator_username, sale.operator_role, sale.admin_id)}</p>
               </td>
               <td className="max-w-[290px] px-4 py-3 align-top">
                 <p className="line-clamp-2 font-semibold leading-5 text-steel-700">{sale.items_summary || '—'}</p>
@@ -12801,13 +12804,13 @@ onChange={(e) =>
       <table className="w-full text-xs">
         <thead className="border-b border-steel-200 bg-steel-50">
           <tr className="text-left uppercase tracking-wider text-steel-500">
-            <th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Processed By</th><th className="px-4 py-3">Products / Items</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Items</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Gross Merchandise</th><th className="px-4 py-3">Discount</th><th className="px-4 py-3">Refunds</th><th className="px-4 py-3">Net Merchandise</th><th className="px-4 py-3">Service / Delivery</th><th className="px-4 py-3">Total Revenue</th><th className="px-4 py-3">COGS</th><th className="px-4 py-3">Gross Profit</th><th className="px-4 py-3">Gross Margin</th><th className="px-4 py-3">Payment Method</th><th className="px-4 py-3">Sale State</th>
+            <th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Products / Items</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">Items</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Gross Merchandise</th><th className="px-4 py-3">Discount</th><th className="px-4 py-3">Refunds</th><th className="px-4 py-3">Net Merchandise</th><th className="px-4 py-3">Service / Delivery</th><th className="px-4 py-3">Total Revenue</th><th className="px-4 py-3">COGS</th><th className="px-4 py-3">Gross Profit</th><th className="px-4 py-3">Gross Margin</th><th className="px-4 py-3">Payment Method</th><th className="px-4 py-3">Sale State</th>
           </tr>
         </thead>
         <tbody>
           {filteredSalesHistory.map((sale) => (
             <tr key={sale.sale_id} className="border-b border-steel-100 last:border-0 hover:bg-steel-50/50">
-              <td className="whitespace-nowrap px-4 py-3 text-steel-500">{new Date(sale.sale_date).toLocaleString()}</td><td className="whitespace-nowrap px-4 py-3 font-semibold text-steel-800">{sale.reference}</td><td className="min-w-[155px] px-4 py-3 text-steel-700">{staffIdentity(sale.operator_name || sale.operator_username, sale.operator_role, sale.admin_id)}</td><td className="min-w-[220px] px-4 py-3 text-steel-700">{sale.items_summary || '—'}</td><td className="px-4 py-3"><span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${sale.source_label === 'POS' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-green-200 bg-green-50 text-green-700'}`}>{sale.source_label}</span></td><td className="px-4 py-3">{sale.item_count}</td><td className="whitespace-nowrap px-4 py-3 font-bold">{sale.net_quantity ?? sale.total_quantity}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.gross_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3 text-amber-700">{formatPeso(sale.discount_amount)}</td><td className="whitespace-nowrap px-4 py-3 text-red-700">{formatPeso(sale.total_refunds)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.net_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.fee_revenue)}</td><td className="whitespace-nowrap px-4 py-3 font-semibold">{formatPeso(sale.total_revenue)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.cogs)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{formatPeso(sale.gross_profit)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{Number(sale.gross_profit_margin || 0).toFixed(2)}%</td><td className="px-4 py-3">{formatPaymentMethod(sale.payment_method || 'cash')}</td><td className="px-4 py-3">{sale.adjustment_state || 'Completed'}</td>
+              <td className="whitespace-nowrap px-4 py-3 text-steel-500">{new Date(sale.sale_date).toLocaleString()}</td><td className="whitespace-nowrap px-4 py-3 font-semibold text-steel-800">{sale.reference}</td><td className="min-w-[220px] px-4 py-3 text-steel-700">{sale.items_summary || '—'}</td><td className="px-4 py-3"><span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${sale.source_label === 'POS' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-green-200 bg-green-50 text-green-700'}`}>{sale.source_label}</span></td><td className="px-4 py-3">{sale.item_count}</td><td className="whitespace-nowrap px-4 py-3 font-bold">{sale.net_quantity ?? sale.total_quantity}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.gross_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3 text-amber-700">{formatPeso(sale.discount_amount)}</td><td className="whitespace-nowrap px-4 py-3 text-red-700">{formatPeso(sale.total_refunds)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.net_merchandise_sales)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.fee_revenue)}</td><td className="whitespace-nowrap px-4 py-3 font-semibold">{formatPeso(sale.total_revenue)}</td><td className="whitespace-nowrap px-4 py-3">{formatPeso(sale.cogs)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{formatPeso(sale.gross_profit)}</td><td className="whitespace-nowrap px-4 py-3 font-bold text-green-700">{Number(sale.gross_profit_margin || 0).toFixed(2)}%</td><td className="px-4 py-3">{formatPaymentMethod(sale.payment_method || 'cash')}</td><td className="px-4 py-3">{sale.adjustment_state || 'Completed'}</td>
             </tr>
           ))}
         </tbody>
@@ -12816,25 +12819,24 @@ onChange={(e) =>
   )}
 </div>
 
-{selectedSaleHistory && (
-  <ViewportDetailsDialog titleId="sale-detail-title" onClose={() => setSelectedSaleHistory(null)}>
+{selectedSaleHistory && createPortal(
+  <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="sale-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedSaleHistory(null); }}>
+    <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
       <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
         <div><p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Sale Details</p><h3 id="sale-detail-title" className="mt-1 font-display text-lg font-extrabold text-[#17372D]">{selectedSaleHistory.reference}</h3><p className="mt-1 text-[10px] text-[#71817A]">{new Date(selectedSaleHistory.sale_date).toLocaleString()}</p></div>
-        <div className="flex items-center gap-2">{!selectedSaleHistory.order_id && <button type="button" className="inline-flex items-center gap-1 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-bold text-white" onClick={() => { const token = localStorage.getItem('token'); if (token) void reprintPosReceipt(selectedSaleHistory.sale_id, token); }}><Printer className="h-4 w-4"/> Reprint POS Receipt</button>}
-        <button type="button" onClick={() => setSelectedSaleHistory(null)} className="rounded-xl border border-[#DDE6E0] p-2 text-[#52635B] hover:bg-[#F5F8F6]" aria-label="Close sale details"><X className="h-4 w-4" /></button></div>
+        <button type="button" onClick={() => setSelectedSaleHistory(null)} className="rounded-xl border border-[#DDE6E0] p-2 text-[#52635B] hover:bg-[#F5F8F6]" aria-label="Close sale details"><X className="h-4 w-4" /></button>
       </div>
       <div className="space-y-4 p-5">
         <div className="rounded-2xl border border-[#E5ECE8] bg-[#FAFCFB] p-4"><p className="text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#71817A]">Products / Items</p><p className="mt-2 text-sm font-semibold leading-6 text-[#34463F]">{selectedSaleHistory.items_summary || '—'}</p></div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            [selectedSaleHistory.order_id ? 'Completed By' : 'POS Operator', staffIdentity(selectedSaleHistory.operator_name || selectedSaleHistory.operator_username, selectedSaleHistory.operator_role, selectedSaleHistory.admin_id)],
-            ['Shift Reference', selectedSaleHistory.shift_id ? `#${selectedSaleHistory.shift_id}` : 'No shift assigned'],
-            ['Shift Owner', selectedSaleHistory.shift_id ? staffIdentity(selectedSaleHistory.shift_owner_name || selectedSaleHistory.shift_owner_username, selectedSaleHistory.shift_owner_role, selectedSaleHistory.shift_owner_id) : 'No shift assigned'],
-            ['Source', selectedSaleHistory.source_label], ['Payment Method', formatPaymentMethod(selectedSaleHistory.payment_method || 'cash')], ['Card Terminal Reference', selectedSaleHistory.card_payment_reference || 'Not applicable'], ['Cash Received', selectedSaleHistory.cash_received == null ? 'Not applicable' : formatPeso(Number(selectedSaleHistory.cash_received))], ['Change Given', selectedSaleHistory.change_amount == null ? 'Not applicable' : formatPeso(Number(selectedSaleHistory.change_amount))], ['Sale State', selectedSaleHistory.adjustment_state || 'Completed'], ['Gross Merchandise', formatPeso(selectedSaleHistory.gross_merchandise_sales)], ['Discount', formatPeso(selectedSaleHistory.discount_amount)], ['Returns / Refunds', formatPeso(selectedSaleHistory.total_refunds)], ['Net Merchandise Sales', formatPeso(selectedSaleHistory.net_merchandise_sales)], ['Service / Delivery Revenue', formatPeso(selectedSaleHistory.fee_revenue)], ['Total Revenue', formatPeso(selectedSaleHistory.total_revenue)], ['COGS', formatPeso(selectedSaleHistory.cogs)], ['Gross Profit', formatPeso(selectedSaleHistory.gross_profit)], ['Gross Profit Margin', `${Number(selectedSaleHistory.gross_profit_margin || 0).toFixed(2)}%`], ['Original COGS', formatPeso(selectedSaleHistory.original_cogs)], ['COGS Reversed', formatPeso(selectedSaleHistory.cogs_reversed)], ['Returned Quantity', selectedSaleHistory.returned_quantity.toLocaleString()],
+            ['Source', selectedSaleHistory.source_label], ['Payment Method', formatPaymentMethod(selectedSaleHistory.payment_method || 'cash')], ['Sale State', selectedSaleHistory.adjustment_state || 'Completed'], ['Gross Merchandise', formatPeso(selectedSaleHistory.gross_merchandise_sales)], ['Discount', formatPeso(selectedSaleHistory.discount_amount)], ['Returns / Refunds', formatPeso(selectedSaleHistory.total_refunds)], ['Net Merchandise Sales', formatPeso(selectedSaleHistory.net_merchandise_sales)], ['Service / Delivery Revenue', formatPeso(selectedSaleHistory.fee_revenue)], ['Total Revenue', formatPeso(selectedSaleHistory.total_revenue)], ['COGS', formatPeso(selectedSaleHistory.cogs)], ['Gross Profit', formatPeso(selectedSaleHistory.gross_profit)], ['Gross Profit Margin', `${Number(selectedSaleHistory.gross_profit_margin || 0).toFixed(2)}%`], ['Original COGS', formatPeso(selectedSaleHistory.original_cogs)], ['COGS Reversed', formatPeso(selectedSaleHistory.cogs_reversed)], ['Returned Quantity', selectedSaleHistory.returned_quantity.toLocaleString()],
           ].map(([label, value]) => <div key={label} className="rounded-xl border border-[#E5ECE8] bg-white p-3"><p className="text-[8px] font-extrabold uppercase tracking-[0.1em] text-[#7A8E85]">{label}</p><p className="mt-1 text-sm font-extrabold tabular-nums text-[#17372D]">{value}</p></div>)}
         </div>
       </div>
-  </ViewportDetailsDialog>
+    </div>
+  </div>,
+  document.body
 )}
   </div>
 )}
@@ -13047,8 +13049,9 @@ onChange={(e) =>
       )}
     </div>
 
-    {selectedMovementHistory && (
-      <ViewportDetailsDialog titleId="movement-detail-title" onClose={() => setSelectedMovementHistory(null)}>
+    {selectedMovementHistory && createPortal(
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedMovementHistory(null); }}>
+        <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-[#DDE6E0] bg-white shadow-2xl">
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#E5ECE8] bg-white px-5 py-4">
             <div><p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-[#15803d]">Inventory Movement</p><h3 id="movement-detail-title" className="mt-1 font-display text-lg font-extrabold text-[#17372D]">{selectedMovementHistory.reference_label || `Movement #${selectedMovementHistory.movement_id}`}</h3><p className="mt-1 text-[10px] text-[#71817A]">{new Date(selectedMovementHistory.movement_date).toLocaleString()}</p></div>
             <button type="button" onClick={() => setSelectedMovementHistory(null)} className="rounded-xl border border-[#DDE6E0] p-2 text-[#52635B] hover:bg-[#F5F8F6]" aria-label="Close movement details"><X className="h-4 w-4" /></button>
@@ -13062,7 +13065,9 @@ onChange={(e) =>
             </div>
             {selectedMovementHistory.receipt_path && <a href={selectedMovementHistory.receipt_path} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-[#CFE0D7] bg-emerald-50 px-4 py-2.5 text-xs font-extrabold text-[#0D7740] hover:bg-emerald-100"><Eye className="h-4 w-4" />Open supporting receipt</a>}
           </div>
-      </ViewportDetailsDialog>
+        </div>
+      </div>,
+      document.body
     )}
   </div>
 )}
