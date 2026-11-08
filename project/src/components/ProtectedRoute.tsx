@@ -7,7 +7,7 @@ import {
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  allowedRole?: 'customer' | 'admin';
+  allowedRole?: 'customer' | 'admin' | 'cashier' | 'super_admin';
 }
 
 export function ProtectedRoute({
@@ -20,7 +20,7 @@ export function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRole && session.user.role !== allowedRole) {
+  if (allowedRole && session.user.role !== allowedRole && !(allowedRole === 'admin' && session.user.role === 'super_admin')) {
     return (
       <Navigate
         to={getDashboardPath(session.user.role)}

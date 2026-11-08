@@ -11,6 +11,66 @@ import {
   type GoogleRegistrationData,
 } from '../components/GoogleSignInButton';
 
+
+const PH_LOCAL_MOBILE_PATTERN = /^9\d{9}$/;
+
+const normalizePhilippineMobileInput = (value: string) => {
+  let digits = value.replace(/\D/g, '');
+
+  // Accept pasted variants while keeping the visible field as the 10 digits
+  // entered after the fixed +63 prefix.
+  if (/^639\d{9}$/.test(digits)) digits = digits.slice(2);
+  if (/^09\d{9}$/.test(digits)) digits = digits.slice(1);
+
+  return digits.slice(0, 10);
+};
+
+const getPasswordChecks = (password: string) => ({
+  minimumLength: password.length >= 8,
+  uppercase: /[A-Z]/.test(password),
+  lowercase: /[a-z]/.test(password),
+  number: /\d/.test(password),
+  special: /[^A-Za-z0-9]/.test(password),
+});
+
+const isStrongPassword = (password: string) =>
+  Object.values(getPasswordChecks(password)).every(Boolean);
+
+const generateStrongPassword = () => {
+  const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijkmnopqrstuvwxyz';
+  const numbers = '23456789';
+  const special = '!@#$%^&*';
+  const all = uppercase + lowercase + numbers + special;
+
+  const randomIndex = (length: number) => {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const values = new Uint32Array(1);
+      crypto.getRandomValues(values);
+      return values[0] % length;
+    }
+    return Math.floor(Math.random() * length);
+  };
+
+  const chars = [
+    uppercase[randomIndex(uppercase.length)],
+    lowercase[randomIndex(lowercase.length)],
+    numbers[randomIndex(numbers.length)],
+    special[randomIndex(special.length)],
+  ];
+
+  while (chars.length < 14) {
+    chars.push(all[randomIndex(all.length)]);
+  }
+
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1);
+    [chars[index], chars[swapIndex]] = [chars[swapIndex], chars[index]];
+  }
+
+  return chars.join('');
+};
+
 export function CustomerRegister() {
   const ref = useReveal<HTMLDivElement>();
   const navigate = useNavigate();
@@ -35,7 +95,29 @@ export function CustomerRegister() {
 ] = useState<GoogleRegistrationData | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+
+    setFormData((previous) => ({
+      ...previous,
+      [name]: name === 'phone_number'
+        ? normalizePhilippineMobileInput(value)
+        : value,
+    }));
+  };
+
+  const phoneIsValid = PH_LOCAL_MOBILE_PATTERN.test(formData.phone_number);
+  const passwordChecks = getPasswordChecks(formData.password);
+  const passwordIsStrong = isStrongPassword(formData.password);
+
+  const handleSuggestPassword = () => {
+    const suggestedPassword = generateStrongPassword();
+    setFormData((previous) => ({
+      ...previous,
+      password: suggestedPassword,
+      confirm_password: suggestedPassword,
+    }));
+    setShowPassword(true);
+    setShowConfirmPassword(true);
   };
 
   const handleGoogleRegistrationRequired = (
@@ -84,6 +166,24 @@ const cancelGoogleRegistration = () => {
   setStatus('idle');
   setMessage('');
 
+  if (!phoneIsValid) {
+    setStatus('error');
+    setMessage('Enter a valid Philippine mobile number: +63 followed by 10 digits starting with 9.');
+    return;
+  }
+
+  if (!formData.address.trim()) {
+    setStatus('error');
+    setMessage('Address is required when creating a customer account.');
+    return;
+  }
+
+  if (!passwordIsStrong) {
+    setStatus('error');
+    setMessage('A strong password is required. Please complete all password requirements.');
+    return;
+  }
+
   if (formData.password !== formData.confirm_password) {
     setStatus('error');
     setMessage('Passwords do not match. Please try again.');
@@ -114,7 +214,7 @@ const cancelGoogleRegistration = () => {
           formData.username,
 
         phone_number:
-          formData.phone_number,
+          `+63${formData.phone_number}`,
 
         address:
           formData.address,
@@ -146,7 +246,7 @@ const cancelGoogleRegistration = () => {
         formData.email,
 
       phone_number:
-        formData.phone_number,
+        `+63${formData.phone_number}`,
 
       address:
         formData.address,
@@ -463,13 +563,53 @@ const cancelGoogleRegistration = () => {
                 <span className="h-1.5 w-1.5 rounded-full bg-construction-500 opacity-60 group-focus-within:opacity-100 group-focus-within:animate-ping transition-all" />
                 Phone Number <span className="text-red-400 ml-0.5">*</span>
               </label>
-              <div className="relative">
-                <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-navy-400 group-focus-within:text-construction-500 transition-colors duration-200" />
-                <input
-                  type="tel" name="phone_number" required value={formData.phone_number} onChange={handleChange}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl border border-white/10 bg-[#064633]/[0.68] text-white placeholder-navy-500 focus:bg-[#064633]/[0.90] focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500 hover:border-white/20 focus:scale-[1.01] transition-all duration-200 ease-out outline-none"
-                  placeholder="+63 912 345 6789"
-                />
+              <div>
+                <div className="relative flex">
+                  <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-navy-400 group-focus-within:text-construction-500 transition-colors duration-200" />
+                  <span className={`flex items-center rounded-l-xl border border-r-0 bg-[#064633]/[0.90] pl-11 pr-3 text-sm font-bold text-emerald-100 ${
+                    formData.phone_number && !phoneIsValid
+                      ? 'border-red-500/60'
+                      : phoneIsValid
+                        ? 'border-emerald-400/60'
+                        : 'border-white/10'
+                  }`}>
+                    +63
+                  </span>
+                  <input
+                    type="tel"
+                    name="phone_number"
+                    required
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    maxLength={10}
+                    pattern="9[0-9]{9}"
+                    value={formData.phone_number}
+                    onChange={handleChange}
+                    className={`min-w-0 flex-1 rounded-r-xl border bg-[#064633]/[0.68] px-4 py-3 text-white placeholder-navy-500 outline-none transition-all duration-200 ease-out focus:bg-[#064633]/[0.90] focus:ring-2 ${
+                      formData.phone_number && !phoneIsValid
+                        ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500/20'
+                        : phoneIsValid
+                          ? 'border-emerald-400/60 focus:border-emerald-400 focus:ring-emerald-400/20'
+                          : 'border-white/10 hover:border-white/20 focus:border-construction-500 focus:ring-construction-500/20'
+                    }`}
+                    placeholder="9123456789"
+                    aria-describedby="registration-phone-help"
+                  />
+                </div>
+                <p
+                  id="registration-phone-help"
+                  className={`mt-1.5 text-[11px] ${
+                    formData.phone_number && !phoneIsValid
+                      ? 'text-red-300'
+                      : phoneIsValid
+                        ? 'text-emerald-300'
+                        : 'text-navy-400'
+                  }`}
+                >
+                  {phoneIsValid
+                    ? 'Valid Philippine mobile number.'
+                    : 'Enter 10 digits starting with 9 after +63 (example: 9123456789).'}
+                </p>
               </div>
             </div>
           </div>
@@ -492,15 +632,16 @@ const cancelGoogleRegistration = () => {
 
 <div className="group">
   <label className="block text-xs font-mono uppercase tracking-wider text-navy-300 mb-1.5">
-    Address <span className="text-navy-500 normal-case">(Optional)</span>
+    Address <span className="text-red-400 ml-0.5">*</span>
   </label>
 
   <input
-  type="text"
-  name="address"
-  value={formData.address}
-  onChange={handleChange}
-  placeholder="House/Street, Barangay, Municipality"
+    type="text"
+    name="address"
+    required
+    value={formData.address}
+    onChange={handleChange}
+    placeholder="House/Street, Barangay, Municipality"
     className="w-full px-4 py-3 rounded-xl border border-white/10 bg-[#064633]/[0.68] text-white placeholder-navy-500 focus:bg-[#064633]/[0.90] focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500 hover:border-white/20 outline-none"
   />
 </div>
@@ -518,8 +659,15 @@ const cancelGoogleRegistration = () => {
                   type={showPassword ? 'text' : 'password'} name="password" required
                   minLength={8}
                   value={formData.password} onChange={handleChange}
-                  className="w-full pl-11 pr-10 py-3 rounded-xl border border-white/10 bg-[#064633]/[0.68] text-white placeholder-navy-500 focus:bg-[#064633]/[0.90] focus:ring-2 focus:ring-construction-500/20 focus:border-construction-500 hover:border-white/20 focus:scale-[1.01] transition-all duration-200 ease-out outline-none"
+                  className={`w-full pl-11 pr-10 py-3 rounded-xl border bg-[#064633]/[0.68] text-white placeholder-navy-500 focus:bg-[#064633]/[0.90] focus:ring-2 focus:scale-[1.01] transition-all duration-200 ease-out outline-none ${
+                    formData.password && !passwordIsStrong
+                      ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500/20'
+                      : passwordIsStrong
+                        ? 'border-emerald-400/60 focus:border-emerald-400 focus:ring-emerald-400/20'
+                        : 'border-white/10 hover:border-white/20 focus:border-construction-500 focus:ring-construction-500/20'
+                  }`}
                   placeholder="••••••••"
+                  aria-describedby="password-requirements"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-navy-400 hover:text-construction-500 hover:scale-110 active:scale-90 transition-all duration-150 focus:outline-none">
@@ -550,6 +698,52 @@ const cancelGoogleRegistration = () => {
                   {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div id="password-requirements" className="rounded-xl border border-white/10 bg-[#043d2d]/45 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className={`text-xs font-bold ${
+                  formData.password && !passwordIsStrong
+                    ? 'text-red-300'
+                    : passwordIsStrong
+                      ? 'text-emerald-300'
+                      : 'text-navy-200'
+                }`}>
+                  {passwordIsStrong ? 'Strong password accepted.' : 'Strong password required.'}
+                </p>
+                <p className="mt-1 text-[11px] text-navy-400">
+                  Use all five requirements below. Validation updates while you type.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSuggestPassword}
+                className="w-fit rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[11px] font-bold text-emerald-200 transition hover:bg-emerald-400/15"
+              >
+                Suggest Strong Password
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-5">
+              {[
+                ['8+ characters', passwordChecks.minimumLength],
+                ['Uppercase', passwordChecks.uppercase],
+                ['Lowercase', passwordChecks.lowercase],
+                ['Number', passwordChecks.number],
+                ['Special character', passwordChecks.special],
+              ].map(([label, passed]) => (
+                <div
+                  key={String(label)}
+                  className={`flex items-center gap-1.5 ${passed ? 'text-emerald-300' : 'text-navy-400'}`}
+                >
+                  {passed
+                    ? <CheckCircle className="h-3.5 w-3.5 shrink-0" />
+                    : <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-current" />}
+                  <span>{String(label)}</span>
+                </div>
+              ))}
             </div>
           </div>
 

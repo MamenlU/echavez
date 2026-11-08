@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, Clock, Loader2, ArrowRight } from 'lucide-react';
+import { Footer } from '../components/Footer';
 
 export function PaymentReturn() {
   const [searchParams] = useSearchParams();
@@ -60,7 +61,8 @@ export function PaymentReturn() {
   }, [status, countdown, navigate]);
 
   return (
-    <main className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen flex flex-col bg-gray-50">
+    <main className="flex-grow flex items-center justify-center px-4 py-12">
       <section className="max-w-md w-full bg-white rounded-3xl border border-emerald-100 shadow-lg p-8 text-center" aria-live="polite">
         <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-emerald-50 flex items-center justify-center text-[#15803d]">
           {status === 'verifying' ? <Loader2 className="w-8 h-8 animate-spin" /> : status === 'paid' ? <CheckCircle className="w-8 h-8" /> : <Clock className="w-8 h-8" />}
@@ -82,5 +84,7 @@ export function PaymentReturn() {
         )}
       </section>
     </main>
+    <Footer showNavigationSections={false} />
+    </div>
   );
 }

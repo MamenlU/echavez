@@ -1,39 +1,32 @@
 import {
   ArrowRight,
+  MessageCircle,
   Package,
-  Search,
   Store,
+  Tag,
   Truck,
 } from 'lucide-react';
-
-interface HeroProduct {
-  name: string;
-  price: number | string;
-  stock: number | string;
-  unit?: string | null;
-}
+import { Link } from 'react-router-dom';
 
 interface HeroProps {
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
-  onSearchSubmit: () => void;
-  heroProduct?: HeroProduct;
+  onShopProductsClick: () => void;
+  supportHref?: string;
+  onSupportClick?: () => void;
 }
 
 export function Hero({
-  searchQuery,
-  onSearchChange,
-  onSearchSubmit,
-  heroProduct,
+  onShopProductsClick,
+  supportHref = '/login',
+  onSupportClick,
 }: HeroProps) {
-  const stockUnit = String(heroProduct?.unit || 'units').trim() || 'units';
-
   return (
     <section
       id="top"
-      className="relative isolate overflow-hidden border-b border-[#dfe9e2] bg-[#eef7f0] pt-24 lg:min-h-[650px] lg:pt-0"
+      aria-labelledby="storefront-hero-title"
+      className="relative isolate overflow-hidden border-b border-[#dfe9e2] bg-[#eef7f0] pt-24 lg:min-h-[650px] lg:pt-4"
     >
-      <div className="absolute inset-0 -z-20 bg-[linear-gradient(105deg,#f7fbf7_0%,#edf7ef_45%,#dcefdc_100%)]" />
+      <div className="absolute inset-0 -z-20 bg-[linear-gradient(108deg,#f9fcfa_0%,#edf7ef_45%,#dcefdc_100%)]" />
+      <div className="pointer-events-none absolute -left-24 top-32 -z-10 h-72 w-72 rounded-full bg-emerald-300/20 blur-3xl" />
 
       <img
         src="/images/rayjin-storefront-hero.png"
@@ -42,121 +35,105 @@ export function Hero({
       />
 
       <div
-        className="absolute inset-0 -z-[5] hidden bg-[linear-gradient(90deg,rgba(247,251,247,0.98)_0%,rgba(247,251,247,0.94)_34%,rgba(247,251,247,0.55)_49%,rgba(247,251,247,0.06)_67%,rgba(247,251,247,0)_100%)] lg:block"
+        className="absolute inset-0 -z-[5] hidden bg-[linear-gradient(90deg,rgba(249,252,250,0.995)_0%,rgba(247,251,247,0.97)_35%,rgba(247,251,247,0.64)_51%,rgba(247,251,247,0.11)_69%,rgba(247,251,247,0)_100%)] lg:block"
         aria-hidden
       />
 
-      <div className="mx-auto flex min-h-[560px] max-w-7xl items-center px-5 py-10 md:px-8 lg:min-h-[650px] lg:py-20">
-        <div className="w-full lg:max-w-[48%]">
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/80 px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#15803d] shadow-sm backdrop-blur-sm">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+      <div className="mx-auto flex min-h-[545px] max-w-7xl items-center px-5 py-10 md:px-8 lg:min-h-[650px] lg:py-16">
+        <div className="w-full lg:max-w-[49%]">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/90 px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#15803d] shadow-sm backdrop-blur-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-2 w-2 animate-ping rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
             Rayjin Hardware Online Store
           </div>
 
-          <h1 className="mt-5 font-display text-4xl font-extrabold leading-[1.06] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[4rem]">
-            Build better.
-            <span className="block text-[#16a34a]">Shop hardware online.</span>
+          <h1 id="storefront-hero-title" className="mt-5 max-w-2xl font-display text-4xl font-extrabold leading-[1.03] tracking-tight text-[#123c2d] sm:text-5xl lg:text-[4.15rem]">
+            Project-ready hardware.
+            <span className="block text-[#16a34a]">Easier ordering.</span>
           </h1>
 
-          <p className="mt-5 max-w-2xl text-sm leading-7 text-[#4f675d] sm:text-base">
-            Browse available Rayjin Hardware products, check current stock, and order online for
-            Store Pickup, Local Delivery, or Shop &amp; Go.
+          <p className="mt-5 max-w-[36rem] text-sm leading-7 text-[#4f675d] sm:text-base">
+            Shop hardware online with clear pricing, convenient pickup options, and local delivery
+            across Initao, Libertad, Naawan, and Gitagum.
           </p>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              onSearchSubmit();
-            }}
-            className="mt-7"
-          >
-            <div className="relative max-w-xl">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6f847a]" />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder="Search cement, tools, paint, roofing..."
-                aria-label="Search Rayjin Hardware products"
-                className="h-13 w-full rounded-2xl border border-[#d6e5da] bg-white/95 py-3.5 pl-11 pr-14 text-sm font-medium text-[#17372d] shadow-[0_12px_35px_-24px_rgba(11,59,35,0.55)] outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-              />
-              <button
-                type="submit"
-                aria-label="Search products"
-                className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl bg-[#15803d] text-white shadow-sm transition hover:bg-[#166534]"
-              >
-                <Search className="h-4 w-4" />
-              </button>
-            </div>
-          </form>
-
-          <div className="mt-5 flex flex-wrap gap-3">
+          <div className="mt-7 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={onSearchSubmit}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:bg-[#166534] active:scale-[0.98]"
+              onClick={onShopProductsClick}
+              className="inline-flex items-center gap-2 min-h-11 rounded-xl bg-[#15803d] px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-emerald-900/15 transition hover:-translate-y-0.5 hover:bg-[#166534] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
             >
               Shop Products <ArrowRight className="h-4 w-4" />
             </button>
             <a
               href="#categories"
-              className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white/85 px-5 py-3 text-sm font-extrabold text-[#166534] shadow-sm transition hover:bg-emerald-50"
+              className="inline-flex items-center gap-2 min-h-11 rounded-xl border border-emerald-300 bg-white/90 px-5 py-3 text-sm font-extrabold text-[#166534] shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
             >
               Browse Categories
             </a>
           </div>
 
-          <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-[11px] font-bold text-[#4f675d]">
-            <span className="inline-flex items-center gap-1.5">
-              <Package className="h-4 w-4 text-[#16a34a]" /> Live stock
+          <Link
+            to={supportHref}
+            onClick={onSupportClick}
+            className="mt-5 flex max-w-xl items-center gap-3 rounded-2xl border border-emerald-200/80 bg-white/82 px-4 py-3.5 text-left shadow-[0_14px_35px_-28px_rgba(11,59,35,0.8)] backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#15803d]"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-[#15803d]">
+              <MessageCircle className="h-5 w-5" />
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Store className="h-4 w-4 text-[#16a34a]" /> Store pickup
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-extrabold text-[#17372d]">Not sure which item fits your project?</span>
+              <span className="mt-0.5 block text-[11px] leading-5 text-[#61766d]">Ask Rayjin Hardware about products, pickup, or delivery.</span>
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Truck className="h-4 w-4 text-[#16a34a]" /> Local delivery
+            <span className="hidden items-center gap-1 text-[11px] font-extrabold text-[#15803d] sm:inline-flex">
+              Message us <ArrowRight className="h-3.5 w-3.5" />
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Store className="h-4 w-4 text-[#16a34a]" /> Shop &amp; Go
-            </span>
+          </Link>
+
+          <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-[11px] font-bold text-[#4f675d]">
+            <span className="inline-flex items-center gap-1.5"><Package className="h-4 w-4 text-[#16a34a]" /> Live stock</span>
+            <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-[#16a34a]" /> Clear pricing</span>
+            <span className="inline-flex items-center gap-1.5"><MessageCircle className="h-4 w-4 text-[#16a34a]" /> Customer support</span>
           </div>
 
           <div className="mt-8 overflow-hidden rounded-3xl border border-[#dce9df] bg-white shadow-[0_24px_55px_-36px_rgba(11,59,35,0.62)] lg:hidden">
             <img
               src="/images/rayjin-storefront-hero.png"
               alt="Rayjin Hardware product assortment"
-              className="h-72 w-full object-cover object-[72%_center] sm:h-80"
+              className="h-64 w-full object-cover object-[72%_center] sm:h-80"
             />
           </div>
         </div>
       </div>
 
-      {heroProduct && (
-        <div className="pointer-events-none absolute right-[7%] top-28 hidden lg:block">
-          <div className="rounded-2xl border border-white/80 bg-white/90 px-4 py-3 shadow-xl shadow-emerald-950/10 backdrop-blur-md">
-            <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#15803d]">In Stock</p>
-            <p className="mt-0.5 text-sm font-extrabold text-[#17372d]">
-              {Number(heroProduct.stock)} {stockUnit}
-            </p>
-          </div>
-        </div>
-      )}
+      <div
+        className="pointer-events-none absolute right-[3.6%] top-[8.6rem] hidden w-[15.5rem] rounded-2xl border border-white/25 bg-[#0b3b23]/90 p-4 shadow-[0_22px_50px_-28px_rgba(5,46,22,0.78)] backdrop-blur-xl xl:flex 2xl:right-[4.5%]"
+        aria-label="Rayjin Hardware local delivery coverage"
+      >
+        <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/12 text-emerald-200 ring-1 ring-white/15">
+          <Truck className="h-5 w-5" />
+        </span>
+        <span>
+          <span className="block text-[9px] font-extrabold uppercase tracking-[0.17em] text-emerald-200">Local Delivery</span>
+          <span className="mt-1 block text-sm font-extrabold leading-5 text-white">4 nearby municipalities</span>
+          <span className="mt-1 block text-[10px] leading-4 text-emerald-50/80">Initao · Libertad · Naawan · Gitagum</span>
+        </span>
+      </div>
 
-      {heroProduct && (
-        <div className="pointer-events-none absolute right-[4%] top-[43%] hidden lg:block">
-          <div className="rounded-2xl border border-white/80 bg-white/90 px-4 py-3 shadow-xl shadow-emerald-950/10 backdrop-blur-md">
-            <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-[#61766d]">From</p>
-            <p className="mt-0.5 font-display text-xl font-extrabold text-[#15803d]">
-              ₱{Number(heroProduct.price).toFixed(2)}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="pointer-events-none absolute bottom-24 right-[9%] hidden lg:block">
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/90 px-4 py-2 text-[10px] font-extrabold text-[#166534] shadow-xl shadow-emerald-950/10 backdrop-blur-md">
-          <Truck className="h-4 w-4 text-[#16a34a]" /> Pickup Available
-        </div>
+      <div
+        className="pointer-events-none absolute bottom-[5.25rem] right-[7%] hidden w-[14.5rem] rounded-2xl border border-white/25 bg-[#0b3b23]/90 p-4 shadow-[0_22px_50px_-28px_rgba(5,46,22,0.78)] backdrop-blur-xl 2xl:flex"
+        aria-label="Rayjin Hardware fulfillment options"
+      >
+        <span className="mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/12 text-emerald-200 ring-1 ring-white/15">
+          <Store className="h-5 w-5" />
+        </span>
+        <span>
+          <span className="block text-[9px] font-extrabold uppercase tracking-[0.17em] text-emerald-200">Order Your Way</span>
+          <span className="mt-1 block text-sm font-extrabold leading-5 text-white">Pickup · Shop &amp; Go · Delivery</span>
+          <span className="mt-1 block text-[10px] leading-4 text-emerald-50/80">Choose the fulfillment option that fits your order.</span>
+        </span>
       </div>
     </section>
   );

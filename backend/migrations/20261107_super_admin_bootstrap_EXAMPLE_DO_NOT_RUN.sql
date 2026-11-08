@@ -1,0 +1,26 @@
+-- TEMPLATE ONLY. DO NOT RUN AS-IS.
+-- Do NOT use in production. Only echavez_cashier_test (local XAMPP MySQL).
+-- An authorized owner must first select the existing Admin ID, verify that
+-- the user is trusted and active, and explicitly replace the example 0.
+--
+-- SELECT id, username, role, status FROM echavez_cashier_test.users
+-- WHERE role = 'admin' AND status = 'active';
+--
+-- START TRANSACTION;
+-- SET @owner_id = 0;  -- <-- REPLACE 0 WITH THE VERIFIED ACTIVE ADMIN ID
+-- UPDATE echavez_cashier_test.users
+-- SET role = 'super_admin'
+-- WHERE id = @owner_id AND role = 'admin' AND status = 'active';
+-- SELECT ROW_COUNT() AS affected_rows;  -- MUST BE EXACTLY 1
+--
+-- Audit the authorized bootstrap manually after checking affected_rows=1:
+-- INSERT INTO echavez_cashier_test.audit_logs
+--   (admin_id, action, entity_type, entity_id, summary, before_data,
+--    after_data, reason, created_at)
+-- VALUES (@owner_id, 'staff.super_admin.bootstrap', 'user', CAST(@owner_id AS CHAR),
+--   'Authorized local initial Super Admin promotion',
+--   '{"role":"admin"}', '{"role":"super_admin","source":"manual_local_bootstrap"}',
+--   'Initial owner-approved Super Admin assignment', NOW());
+-- COMMIT;
+--
+-- Re-check one active Super Admin exists. Never send passwords in SQL or chat.

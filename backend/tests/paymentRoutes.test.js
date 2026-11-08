@@ -6,6 +6,9 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 process.env.NODE_ENV = 'production';
 process.env.JWT_SECRET = 'rayjin-fixture-secret-not-for-deployment';
+// Isolated tests must never send real Admin notification emails.
+process.env.EMAIL_USER = '';
+process.env.EMAIL_APP_PASSWORD = '';
 const { createPaymongoRouter } = await import('../routes/paymongo.js');
 
 function setupState() {
@@ -15,7 +18,7 @@ function setupState() {
 }
 function memoryDatabase(state) {
     let snapshot;
-    return { getConnection: async () => ({
+    return { query: async (_sql, [id]) => [[{ id, username: `user${id}`, role: Number(id) === 1 ? 'admin' : 'customer', status: 'active' }]], getConnection: async () => ({
         beginTransaction: async () => { snapshot = structuredClone(state); },
         commit: async () => {},
         rollback: async () => { for (const key of ['order', 'payments', 'history']) state[key] = structuredClone(snapshot[key]); },
@@ -42,7 +45,13 @@ function memoryDatabase(state) {
                 state.order.payment_status = p[0]; state.order.payment_method = p[1];
             } else if (sql.startsWith('UPDATE orders SET paymongo_link_id')) {
                 state.order.paymongo_link_id = p[0]; state.order.payment_status = 'Pending';
-            } else if (sql.startsWith("UPDATE orders SET status = 'pending'")) state.order.status = 'pending';
+            } else if (/UPDATE orders\s+SET\s+status = \?/.test(sql)) {
+                state.order.status = p[0];
+                if (sql.includes('scheduled_pickup_date = NULL')) {
+                    state.order.scheduled_pickup_date = null;
+                    state.order.scheduled_pickup_time = null;
+                }
+            }
             else if (sql.startsWith('INSERT INTO order_status_history')) state.history.push(p[0]);
             else throw new Error('Unexpected SQL in payment handler: ' + sql);
             return [{ affectedRows: 1 }];
@@ -118,6 +127,22 @@ test('Repeated confirmation is idempotent, including legacy awaiting_payment sta
     await f.post('confirm-payment'); await f.post('confirm-payment');
     assert.equal(state.order.status, 'pending'); assert.equal(state.payments.length, 1); assert.equal(state.history.length, 1);
 });
+for (const fulfillment of ['pickup', 'delivery', 'shop_go']) {
+    test(`Verified ${fulfillment} payment retains the current fulfillment approval rule`, async t => {
+        const state = setupState();
+        state.order.status = 'awaiting_payment'; state.order.fulfillment = fulfillment;
+        state.order.scheduled_pickup_date = '2026-12-20'; state.order.scheduled_pickup_time = '09:00';
+        const f = await fixture(t, { paid: true, state });
+        const result = await f.post('confirm-payment');
+        assert.equal(result.status, 200); assert.equal(state.order.payment_status, 'Paid');
+        assert.equal(state.order.status, fulfillment === 'pickup' ? 'approved' : 'pending');
+        if (fulfillment === 'shop_go') {
+            assert.equal(state.order.scheduled_pickup_date, null);
+            assert.equal(state.order.scheduled_pickup_time, null);
+        }
+        assert.ok(state.calls.every(sql => !/sales|inventory_movements|UPDATE products/.test(sql)));
+    });
+}
 test('Admin may verify an order but cannot open another customer’s checkout', async t => {
     const f = await fixture(t, { paid: true });
     assert.equal((await f.post('confirm-payment', undefined, f.token(1, 'admin'))).body.paymentStatus, 'Paid');

@@ -10,12 +10,15 @@ import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { Home } from './pages/Home';
 import { ProjectOverview } from './pages/ProjectOverview';
+import { PromosRewards } from './pages/PromosRewards';
 import { CustomerRegister } from './pages/CustomerRegister';
 import { Login } from './pages/Login';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { ResetPassword } from './pages/ResetPassword';
 import { CustomerDashboard } from './pages/CustomerDashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { CashierWorkspace } from './pages/CashierWorkspace';
+import { CashierAccountsPage } from './pages/CashierAccountsPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PaymentReturn } from './pages/PaymentReturn';
 import { ScrollManager } from './components/ScrollManager';
@@ -29,11 +32,13 @@ function ConditionalFooter() {
   const { pathname } = useLocation();
 
   // Admin and Customer dashboards use their own page layout.
-  if (pathname.includes('/dashboard')) {
+  if (pathname.includes('/dashboard') || pathname === '/admin/cashiers') {
     return null;
   }
 
-  return <Footer />;
+  // Adviser revision: keep the simplified footer on every public page,
+  // including Login and Customer Registration.
+  return <Footer showNavigationSections={false} />;
 }
 
 function RootRoute() {
@@ -96,6 +101,12 @@ function ForgotPasswordRoute() {
   return <ForgotPassword />;
 }
 
+function HeaderForRole() {
+  const { pathname } = useLocation();
+  // Cashier Console owns its accessible header and navigation.
+  return pathname.startsWith('/cashier/dashboard') || pathname === '/admin/cashiers' ? null : <Navbar />;
+}
+
 function App() {
   return (
     <Router>
@@ -111,7 +122,7 @@ function App() {
           path="/*"
           element={
             <div id="top" className="min-h-screen bg-steel-50 flex flex-col">
-              <Navbar />
+              <HeaderForRole />
 
               <div className="flex-grow">
                 <Routes>
@@ -146,6 +157,12 @@ function App() {
                     element={<ResetPassword />}
                   />
 
+                  {/* Capstone presentation route; uses the dedicated Rayjin project presentation shell. */}
+                  <Route
+                    path="/promos-rewards"
+                    element={<PromosRewards />}
+                  />
+
                   {/* Customer */}
                   <Route
                     path="/customer/dashboard"
@@ -165,6 +182,14 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
+
+                  {/* Narrowly scoped Cashier operations; Admin page remains separate. */}
+                  <Route path="/cashier/dashboard" element={
+                    <ProtectedRoute allowedRole="cashier"><CashierWorkspace /></ProtectedRoute>
+                  } />
+                  <Route path="/admin/cashiers" element={
+                    <ProtectedRoute allowedRole="super_admin"><CashierAccountsPage /></ProtectedRoute>
+                  } />
 
                   {/* Unknown URLs return to the correct entry point */}
                   <Route

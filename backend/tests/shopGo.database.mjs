@@ -35,7 +35,7 @@ try {
         "INSERT INTO suppliers (supplier_id,supplier_name) VALUES (1,'Fixture Supplier');" +
         "INSERT INTO products (id,name,price,category,category_id,supplier_id,image,stock,brand,delivery_class) VALUES (1,'Fixture Hammer',200,'Fixture Tools',1,1,'',10,'Fixture','standard');" +
         "INSERT INTO inventory_movements (product_id,admin_id,supplier_id,movement_type,quantity,supplier_price,selling_price,remarks) VALUES (1,1,1,'Stock-In',10,100,200,'Synthetic opening stock');" +
-        "INSERT INTO delivery_rates (id,barangay,zone,surcharge,is_active) VALUES (1,'Poblacion','poblacion',25,1)"
+        "INSERT INTO delivery_rates (id,municipality,barangay,zone,surcharge,is_active) VALUES (1,'Initao','Poblacion','poblacion',25,1)"
     );
     process.env.NODE_ENV = 'production';
     process.env.DB_HOST = host; process.env.DB_NAME = name;
@@ -122,7 +122,7 @@ try {
     // Cash pickup and delivery regressions retain the current transitions in Stage 1.
     for (const fulfillment of ['pickup', 'delivery']) {
         const p = { fulfillment, paymentMethod: 'cash', items: [{ product: { id: 1 }, quantity: 2 }],
-            deliveryContactPerson: 'Fixture Customer', deliveryContactNumber: '09170000002', deliveryBarangay: 'Poblacion',
+            deliveryContactPerson: 'Fixture Customer', deliveryContactNumber: '09170000002', deliveryMunicipality: 'Initao', deliveryBarangay: 'Poblacion',
             deliveryAddress: 'Fixture address', deliveryLandmark: '', deliveryInstructions: '' };
         const order = await api('/api/orders', p, customer, 'POST', 201);
         if (fulfillment === 'delivery') await api('/api/orders/' + order.orderId + '/delivery-review', { deliveryFee: 175, adminMessage: 'Confirmed' }, admin, 'PUT');

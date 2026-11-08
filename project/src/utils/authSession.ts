@@ -1,4 +1,4 @@
-export type AppRole = 'customer' | 'admin';
+export type AppRole = 'customer' | 'admin' | 'cashier' | 'super_admin';
 
 export interface StoredUser {
   role: AppRole;
@@ -55,7 +55,7 @@ export function getStoredSession(): StoredSession | null {
   try {
     const user = JSON.parse(userStr) as StoredUser;
 
-    if (user.role !== 'customer' && user.role !== 'admin') {
+    if (user.role !== 'customer' && user.role !== 'admin' && user.role !== 'super_admin' && user.role !== 'cashier') {
       clearStoredSession();
       return null;
     }
@@ -76,7 +76,5 @@ export function getStoredSession(): StoredSession | null {
 }
 
 export function getDashboardPath(role: AppRole) {
-  return role === 'admin'
-    ? '/admin/dashboard'
-    : '/customer/dashboard';
+  return (role === 'admin' || role === 'super_admin') ? '/admin/dashboard' : role === 'cashier' ? '/cashier/dashboard' : '/customer/dashboard';
 }

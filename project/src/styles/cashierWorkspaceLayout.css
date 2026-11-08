@@ -1,0 +1,13 @@
+/* Cashier-only layout. No global customer dashboard or storefront styles. */
+.cashier-workspace-content { container: cashier-workspace / inline-size; }
+.cashier-pos-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+@container cashier-workspace (min-width: 780px) {
+  .cashier-pos-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+}
+.cashier-product-results { max-height: min(52dvh, 480px); overscroll-behavior: contain; }
+.cashier-cart-items { max-height: min(27dvh, 220px); overscroll-behavior: contain; }
+.cashier-sidebar-resizer { position: absolute; inset-block: 5rem 1.25rem; right: -0.375rem; width: 0.75rem;
+  align-items: center; justify-content: center; border-radius: 0.375rem; z-index: 2;
+  color: #64748b; cursor: ew-resize; touch-action: none; user-select: none; }
+.cashier-sidebar-resizer:hover, .cashier-sidebar-resizer:focus-visible { background: #d1fae5; color: #065f46; outline-color: #047857; }
+@media (max-height: 680px) { .cashier-product-results { max-height: min(42dvh, 350px); } }

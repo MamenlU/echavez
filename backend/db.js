@@ -18,7 +18,7 @@ if (process.env.DATABASE_URL) {
         queueLimit: 0,
         enableKeepAlive: true,
         keepAliveInitialDelay: 0,
-        ssl: { rejectUnauthorized: false },
+        ssl: { rejectUnauthorized: true, ...(process.env.DB_SSL_CA ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') } : {}) },
     });
 } else {
     pool = mysql.createPool({
