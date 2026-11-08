@@ -222,7 +222,6 @@ const handleSubmit = async (e: React.FormEvent) => {
         <circle cx="20%" cy="30%" r="80" stroke="#6ee7b7" strokeWidth="1" fill="none" />
         <line x1="20%" y1="10%" x2="20%" y2="50%" stroke="#6ee7b7" strokeWidth="1" strokeDasharray="3,3" />
         <line x1="5%" y1="30%" x2="35%" y2="30%" stroke="#6ee7b7" strokeWidth="1" strokeDasharray="3,3" />
-        <path d="M 20% 30% m -140 0 a 140 140 0 1 1 280 0 a 140 140 0 1 1 -280 0" stroke="#6ee7b7" strokeWidth="0.5" fill="none" />
         
         <circle cx="80%" cy="70%" r="180" stroke="#6ee7b7" strokeWidth="1.5" strokeDasharray="8,6" fill="none" />
         <circle cx="80%" cy="70%" r="90" stroke="#6ee7b7" strokeWidth="1" fill="none" />
