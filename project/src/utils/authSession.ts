@@ -1,3 +1,5 @@
+import { getLocalItem, removeLocalItem } from './browserStorage';
+
 export type AppRole = 'customer' | 'admin' | 'cashier' | 'super_admin';
 
 export interface StoredUser {
@@ -11,8 +13,8 @@ export interface StoredSession {
 }
 
 export function clearStoredSession() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
+  removeLocalItem('token');
+  removeLocalItem('user');
 }
 
 function isJwtExpired(token: string): boolean {
@@ -45,8 +47,8 @@ function isJwtExpired(token: string): boolean {
 }
 
 export function getStoredSession(): StoredSession | null {
-  const token = localStorage.getItem('token');
-  const userStr = localStorage.getItem('user');
+  const token = getLocalItem('token');
+  const userStr = getLocalItem('user');
 
   if (!token || !userStr) {
     return null;

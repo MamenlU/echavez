@@ -22,6 +22,7 @@ import { PremiumCategoryShowcase } from '../components/PremiumCategoryShowcase';
 import { StorefrontOrderingJourney } from '../components/StorefrontOrderingJourney';
 import { StorefrontConversionHub } from '../components/StorefrontConversionHub';
 import { useReveal } from '../hooks/useReveal';
+import { getLocalItem, setLocalItem } from '../utils/browserStorage';
 import { rememberCustomerMessagesRedirect } from '../utils/postAuthRedirect';
 
 interface Product {
@@ -84,7 +85,7 @@ export function Home() {
   }, [selectedProduct?.id]);
 
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
+    const userStr = getLocalItem('user');
     if (userStr) {
       try {
         setUser(JSON.parse(userStr) as StoredUser);
@@ -234,7 +235,7 @@ export function Home() {
   };
 
   const addProductToCustomerCart = (product: Product, quantity = 1) => {
-    const storedUser = localStorage.getItem('user');
+    const storedUser = getLocalItem('user');
     let parsedUser: StoredUser | null = null;
 
     if (storedUser) {
@@ -251,7 +252,7 @@ export function Home() {
     }
 
     let cart: CartItem[] = [];
-    const storedCart = localStorage.getItem('customer_cart');
+    const storedCart = getLocalItem('customer_cart');
 
     if (storedCart) {
       try {
@@ -276,7 +277,7 @@ export function Home() {
       cart.push({ product, quantity: Math.min(Math.max(1, quantity), Number(product.stock) || 1) });
     }
 
-    localStorage.setItem('customer_cart', JSON.stringify(cart));
+    setLocalItem('customer_cart', JSON.stringify(cart));
     window.dispatchEvent(new Event('cart-updated'));
     setAddedMessage(`${product.name} added to your cart.`);
     setTimeout(() => setAddedMessage(''), 2600);

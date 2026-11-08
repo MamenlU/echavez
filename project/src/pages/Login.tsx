@@ -5,6 +5,7 @@ import { useReveal } from '../hooks/useReveal';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { consumePostAuthRedirect } from '../utils/postAuthRedirect';
+import { setLocalItem } from '../utils/browserStorage';
 
 export function Login() {
   const ref = useReveal<HTMLDivElement>();
@@ -43,11 +44,14 @@ const handleSubmit = async (e: React.FormEvent) => {
   try {
     const response = await axios.post('/api/auth/login', formData);
 
+    const tokenSaved = setLocalItem('token', response.data.token);
+    const userSaved = setLocalItem('user', JSON.stringify(response.data.user));
+    if (!tokenSaved || !userSaved) {
+      throw new Error('Your browser is blocking site storage. Allow cookies or site data for rayjinhardware.vercel.app, then sign in again.');
+    }
+
     setStatus('success');
     setMessage(`Welcome back, ${response.data.user.username || 'user'}!`);
-
-    localStorage.setItem('token', response.data.token);
-    localStorage.setItem('user', JSON.stringify(response.data.user));
 
     // Notify Navbar immediately
     window.dispatchEvent(new Event('storage'));
@@ -62,7 +66,9 @@ const handleSubmit = async (e: React.FormEvent) => {
   } catch (err) {
     setStatus('error');
 
-    if (axios.isAxiosError(err)) {
+    if (err instanceof Error && err.message.startsWith('Your browser is blocking site storage.')) {
+      setMessage(err.message);
+    } else if (axios.isAxiosError(err)) {
       setMessage(
         err.response?.data?.error || 'Invalid credentials.'
       );

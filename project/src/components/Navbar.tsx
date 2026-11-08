@@ -26,6 +26,7 @@ ChevronDown,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { navLinks } from '../data/content';
+import { getLocalItem, removeLocalItem } from '../utils/browserStorage';
 
 interface NavbarUser {
   username: string;
@@ -87,7 +88,7 @@ export function Navbar() {
 };
 
     const updateCartCount = () => {
-      const cartStr = localStorage.getItem('customer_cart');
+      const cartStr = getLocalItem('customer_cart');
       if (!cartStr) {
         setCartCount(0);
         return;
@@ -214,7 +215,7 @@ export function Navbar() {
 
   const handleLogout = () => {
     clearStoredSession();
-    localStorage.removeItem('customer_cart');
+    removeLocalItem('customer_cart');
     setUser(null);
     setCartCount(0);
     setOpen(false);
@@ -268,7 +269,7 @@ export function Navbar() {
     let cancelled = false;
 
     const fetchUnreadCount = async () => {
-      const token = localStorage.getItem('token');
+      const token = getLocalItem('token');
       if (!token || document.hidden) return;
 
       try {

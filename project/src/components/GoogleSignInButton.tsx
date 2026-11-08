@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { consumePostAuthRedirect } from '../utils/postAuthRedirect';
+import { setLocalItem } from '../utils/browserStorage';
 
 declare global {
   interface Window {
@@ -178,15 +179,12 @@ export function GoogleSignInButton({
         return;
       }
 
-      localStorage.setItem(
-        'token',
-        token
-      );
-
-      localStorage.setItem(
-        'user',
-        JSON.stringify(user)
-      );
+      const tokenSaved = setLocalItem('token', token);
+      const userSaved = setLocalItem('user', JSON.stringify(user));
+      if (!tokenSaved || !userSaved) {
+        onError?.('Your browser is blocking site storage. Allow cookies or site data for rayjinhardware.vercel.app, then sign in again.');
+        return;
+      }
 
       window.dispatchEvent(
         new Event('storage')

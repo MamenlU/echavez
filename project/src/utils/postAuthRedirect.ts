@@ -1,3 +1,5 @@
+import { getSessionItem, removeSessionItem, setSessionItem } from './browserStorage';
+
 const STORAGE_KEY = 'rayjin_post_auth_redirect';
 const CUSTOMER_MESSAGES_PATH = '/customer/dashboard?tab=messages';
 const MAX_AGE_MS = 30 * 60 * 1000;
@@ -13,7 +15,7 @@ export function rememberCustomerMessagesRedirect() {
     createdAt: Date.now(),
   };
 
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  setSessionItem(STORAGE_KEY, JSON.stringify(payload));
 }
 
 export function consumePostAuthRedirect(role: string | undefined) {
@@ -22,8 +24,8 @@ export function consumePostAuthRedirect(role: string | undefined) {
       ? '/admin/dashboard'
       : '/customer/dashboard';
 
-  const raw = sessionStorage.getItem(STORAGE_KEY);
-  sessionStorage.removeItem(STORAGE_KEY);
+  const raw = getSessionItem(STORAGE_KEY);
+  removeSessionItem(STORAGE_KEY);
 
   if (!raw || role !== 'customer') {
     return fallback;
