@@ -15,6 +15,7 @@ import { PurchaseOrdersPanel, type PurchaseOrderReceiveTarget } from '../compone
 import { ReorderSuggestionsPanel } from '../components/ReorderSuggestionsPanel';
 import { CashierShiftPanel, CashierShiftStatusBanner } from '../components/CashierShiftPanel';
 import { ExpenseManagementPanel } from '../components/ExpenseManagementPanel';
+import { getPosDeliverySuggestion } from '../utils/posDeliveryPricing';
 
 import { 
   ClipboardList, ScanBarcode, ArrowLeftRight,
