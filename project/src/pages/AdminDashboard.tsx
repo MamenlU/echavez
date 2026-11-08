@@ -5495,9 +5495,6 @@ const posSelectedRate = deliveryRateSettings.find(
 const posAvailableBarangays = deliveryRateSettings.filter(
   (rate) => rate.municipality === posDeliveryDetails.municipality && rate.is_active
 );
-const posAvailableBarangays = deliveryRateSettings.filter(
-  (rate) => rate.municipality === posDeliveryDetails.municipality && rate.is_active
-);
 const posDeliverySuggestion = getPosDeliverySuggestion(posCart, posFulfillment === 'delivery' ? posSelectedRate : null);
 const posFinalDeliveryFee = posFulfillment === 'delivery'
   ? Number(posDeliveryDetails.delivery_fee || 0)
