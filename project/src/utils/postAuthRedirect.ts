@@ -1,4 +1,5 @@
 import { getSessionItem, removeSessionItem, setSessionItem } from './browserStorage';
+import { getDashboardPath, type AppRole } from './authSession';
 
 const STORAGE_KEY = 'rayjin_post_auth_redirect';
 const CUSTOMER_MESSAGES_PATH = '/customer/dashboard?tab=messages';
@@ -19,10 +20,10 @@ export function rememberCustomerMessagesRedirect() {
 }
 
 export function consumePostAuthRedirect(role: string | undefined) {
-  const fallback =
-    role === 'admin'
-      ? '/admin/dashboard'
-      : '/customer/dashboard';
+  const supportedRoles: AppRole[] = ['customer', 'admin', 'cashier', 'super_admin'];
+  const fallback = role && supportedRoles.includes(role as AppRole)
+    ? getDashboardPath(role as AppRole)
+    : '/customer/dashboard';
 
   const raw = getSessionItem(STORAGE_KEY);
   removeSessionItem(STORAGE_KEY);
